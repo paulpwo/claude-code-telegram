@@ -1,5 +1,6 @@
 .PHONY: install dev test lint format clean help run run-watch run-remote remote-attach remote-stop \
-       bump-patch bump-minor bump-major release version
+       bump-patch bump-minor bump-major release version \
+       docker-build docker-run docker-push
 
 # Default target
 help:
@@ -20,6 +21,9 @@ help:
 	@echo "  run-remote    - Start bot in tmux on remote Mac (unlocks keychain)"
 	@echo "  remote-attach - Attach to running bot tmux session"
 	@echo "  remote-stop   - Stop the bot tmux session"
+	@echo "  docker-build  - Build Docker image (claude-telegram-bot:latest)"
+	@echo "  docker-run    - Start bot via docker-compose (detached)"
+	@echo "  docker-push   - Push image to registry"
 
 install:
 	poetry install --no-dev
@@ -102,6 +106,17 @@ bump-major:  ## Bump major version, commit, and tag
 	git tag "v$$NEW_VERSION" && \
 	git push && git push origin "v$$NEW_VERSION" && \
 	echo "Released v$$NEW_VERSION. Tag pushed — release workflow will run on GitHub."
+
+# --- Docker ---
+
+docker-build:  ## Build the Docker image (tag: claude-telegram-bot:latest)
+	docker build -t claude-telegram-bot:latest .
+
+docker-run:  ## Start bot via docker-compose (detached)
+	docker-compose up -d
+
+docker-push:  ## Push image to registry (set IMAGE_REPO env var or edit this target)
+	docker push claude-telegram-bot:latest
 
 release:  ## Push the current version tag to trigger the release workflow
 	CURRENT_VERSION=$$(poetry version -s) && \

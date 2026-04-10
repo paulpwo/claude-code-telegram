@@ -40,6 +40,37 @@ Instalados en `.claude/skills/` — Claude Code los carga automáticamente cuand
 
 ### Dev local
 
+#### Con Docker (recomendado)
+
+```bash
+# 1. Copiar y editar variables de entorno
+cp .env.example .env
+# Editar .env: TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME, APPROVED_DIRECTORY=/workspace, etc.
+
+# 2. Crear directorios de volúmenes
+mkdir -p data workspace models
+
+# 3. Construir y correr
+make docker-build
+make docker-run          # docker-compose up -d
+
+# Ver logs
+docker-compose logs -f
+
+# Detener
+docker-compose down
+```
+
+Para usar whisper local (VOICE_PROVIDER=local):
+
+```bash
+# Build con whisper-cli compilado (agrega ~400MB y tiempo de build)
+docker build --build-arg WITH_LOCAL_WHISPER=true -t claude-telegram-bot:local .
+# Luego poner el modelo en ./models/ggml-medium.bin
+```
+
+#### Con Poetry (desarrollo local sin Docker)
+
 ```bash
 # Instalar (venv local, no global)
 python3 -m venv .venv
@@ -51,6 +82,14 @@ python3 -m venv .venv
 # Variables de entorno
 cp .env.example .env  # o crear .env manual
 ```
+
+#### Scripts de voz
+
+Los scripts de voz están en `scripts/voice/` (copiados a `/app/scripts/voice/` dentro del contenedor):
+
+- `scripts/voice/transcribe-voice.sh` — transcripción con whisper-cli
+- `scripts/voice/text-to-voice.sh` — TTS con edge-tts
+- `scripts/voice/send-voice-telegram.sh` — envío de nota de voz via Telegram API
 
 ### Sync con upstream
 
