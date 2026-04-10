@@ -14,7 +14,7 @@ GitHub Issue / mensaje Telegram
         ↓
 Bot (Claude Code remoto)
   → Analiza el repo
-  → Crea rama analysis/issue-N-slug
+  → Crea rama Analysis/Issue{N}{Slug}
   → Escribe .agent/planning/sdd.md
   → Escribe .agent/context/files.md
   → Escribe .agent/context/approach.md
@@ -46,13 +46,13 @@ Comando dedicado que ejecuta el workflow SDD completo en un solo paso.
 1. Parsea el input (URL de issue o descripción libre)
 2. Si es URL: lee el issue via `gh issue view`
 3. Determina el repo a analizar (por thread activo o argumento)
-4. Crea rama `analysis/issue-N-slug` (o `analysis/slug` si no hay número)
+4. Crea rama `Analysis/Issue{N}{DescripcionEnPascalCase}` (ej: `Analysis/Issue5DarkMode`)
 5. Explora el repo: estructura, archivos relevantes, contexto del problema
 6. Escribe bajo `.agent/`:
    - `planning/sdd.md` — spec: qué hay que hacer, criterios de aceptación
    - `context/files.md` — archivos relevantes y su rol
    - `context/approach.md` — enfoque sugerido con alternativas y tradeoffs
-7. `git commit` + `git push origin analysis/...`
+7. `git commit` con Gitmoji (`📝 docs(analysis): agregar pre-análisis issue #N`) + `git push`
 8. Responde en Telegram con resumen y nombre de la rama
 
 **Restricciones del comando:**
@@ -72,7 +72,7 @@ Analizá el repo en {working_dir}.
 Contexto de la tarea: {issue_content}
 
 Instrucciones:
-1. Creá la rama analysis/{slug}
+1. Creá la rama Analysis/Issue{N}{DescripcionEnPascalCase}
 2. Explorá el repo — entendé la estructura y los archivos relevantes
 3. Escribí en .agent/planning/sdd.md el spec completo
 4. Escribí en .agent/context/files.md los archivos relevantes y su rol
@@ -206,6 +206,66 @@ Feature 3 (issue polling) → automatización
 Feature 4 (voice TTS)    → UX mejorada
 Deploy VM                → producción
 ```
+
+---
+
+## Convenciones Git (git-paul)
+
+Aplican tanto para el desarrollo de este repo como para los commits que el bot genera en los repos analizados.
+
+### Branches — PascalCase
+
+```
+<Tipo>/<DescripcionEnPascalCase>
+```
+
+| Tipo | Cuándo |
+|------|--------|
+| `Feat/` | Nueva funcionalidad |
+| `Fix/` | Bug fix |
+| `Refactor/` | Refactor sin cambio funcional |
+| `Chore/` | Config, deps, mantenimiento |
+| `Docs/` | Solo documentación |
+| `Analysis/` | Ramas SDD generadas por el bot |
+
+**Ejemplos para este repo:**
+- `Feat/SddCommand`
+- `Fix/GitSafetyProtectedBranches`
+- `Feat/VoiceTtsReplies`
+
+**Ejemplos generados por el bot en repos analizados:**
+- `Analysis/Issue5DarkMode`
+- `Analysis/FixAuthRedirect`
+
+### Commits — Gitmoji + imperativo
+
+```
+<emoji> <tipo>(<scope>): <descripción en imperativo>
+```
+
+| Emoji | Cuándo |
+|-------|--------|
+| ✨ | Nueva funcionalidad |
+| 🐛 | Fix de bug |
+| 🔒️ | Fix de seguridad |
+| 📝 | Documentación / archivos `.agent/` |
+| ♻️ | Refactor |
+| 🔧 | Config |
+| ✅ | Tests |
+
+**Ejemplos:**
+```bash
+✨ feat(sdd): agregar comando /sdd con workflow análisis completo
+🔒 security(git): bloquear push a ramas protegidas en ToolMonitor
+📝 docs(analysis): agregar pre-análisis issue #5 dark mode
+```
+
+### Reglas absolutas
+
+- **NUNCA** `Co-Authored-By: Claude` ni menciones a Claude/Anthropic en commits
+- **NUNCA** `--no-verify` ni saltarse hooks
+- **NUNCA** force push a `main` o `master`
+- Stagear archivos específicos — nunca `git add -A` sin revisar
 
 ---
 
