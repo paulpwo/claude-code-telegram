@@ -1,4 +1,7 @@
-"""Handle voice message transcription via Mistral (Voxtral), OpenAI (Whisper), or local whisper.cpp."""
+"""Handle voice message transcription via Mistral (Voxtral), OpenAI (Whisper), or local whisper.cpp.
+
+Also provides VoiceSender for outgoing TTS voice replies via edge-tts.
+"""
 
 import asyncio
 import shutil
@@ -9,7 +12,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import structlog
-from telegram import Voice
+from telegram import Update, Voice
 
 from src.config.settings import Settings
 
@@ -347,3 +350,121 @@ class VoiceHandler:
             )
         self._resolved_whisper_binary = resolved
         return resolved
+
+
+class VoiceSender:
+    """Synthesize outgoing voice replies using edge-tts and send via Telegram sendVoice.
+
+    Complementary to VoiceHandler (STT) — this class handles TTS (text-to-speech).
+    Requires the ``edge-tts`` CLI binary on PATH (``pip install edge-tts``).
+    """
+
+    # Maximum seconds to wait for the edge-tts subprocess.
+    TTS_SUBPROCESS_TIMEOUT: int = 60
+
+    def __init__(self, config: Settings) -> None:
+        self.config = config
+
+    async def _synthesize_ogg(self, text: str, tmp_dir: Path) -> Path:
+        """Run edge-tts to synthesize OGG/Opus audio from text.
+
+        Args:
+            text: The text to synthesize.
+            tmp_dir: Temporary directory for the output file.
+
+        Returns:
+            Path to the generated OGG file.
+
+        Raises:
+            RuntimeError: On subprocess failure, timeout, or missing binary.
+        """
+        ogg_path = tmp_dir / "reply.ogg"
+        voice = self.config.edge_tts_voice
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "edge-tts",
+                "--voice",
+                voice,
+                "--text",
+                text,
+                "--write-media",
+                str(ogg_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=self.TTS_SUBPROCESS_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                raise RuntimeError(
+                    f"edge-tts synthesis timed out after {self.TTS_SUBPROCESS_TIMEOUT}s."
+                )
+
+            if process.returncode != 0:
+                err_msg = stderr.decode(errors="replace")[:300] if stderr else ""
+                raise RuntimeError(
+                    f"edge-tts synthesis failed (exit {process.returncode}): {err_msg}"
+                )
+
+        except FileNotFoundError:
+            raise RuntimeError(
+                "edge-tts binary not found on PATH. "
+                "Install it with: pip install edge-tts"
+            )
+
+        return ogg_path
+
+    async def send_voice_reply(
+        self,
+        text: str,
+        update: Update,
+        reply_to_message_id: Optional[int] = None,
+    ) -> bool:
+        """Synthesize text as OGG audio and send via Telegram sendVoice.
+
+        Creates a temp directory, synthesizes OGG via edge-tts, sends it,
+        and always cleans up the temp dir (even on failure).
+
+        Args:
+            text: The text to convert to speech.
+            update: The Telegram Update to reply to.
+            reply_to_message_id: Optional message ID to reply to.
+
+        Returns:
+            True on success, False if any step failed.
+        """
+        tmp_dir: Optional[Path] = None
+        try:
+            tmp_dir = Path(tempfile.mkdtemp(prefix="tts_"))
+
+            ogg_path = await self._synthesize_ogg(text, tmp_dir)
+
+            with open(ogg_path, "rb") as audio_file:
+                await update.message.reply_voice(
+                    voice=audio_file,
+                    reply_to_message_id=reply_to_message_id,
+                )
+
+            logger.info(
+                "Voice reply sent",
+                voice=self.config.edge_tts_voice,
+                word_count=len(text.split()),
+            )
+            return True
+
+        except Exception as exc:
+            logger.warning(
+                "Voice reply failed, falling back to text",
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+            return False
+
+        finally:
+            if tmp_dir is not None:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
