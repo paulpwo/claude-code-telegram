@@ -34,6 +34,7 @@ Instalados en `.claude/skills/` — Claude Code los carga automáticamente cuand
 
 | Skill | Cuándo se activa |
 |-------|-----------------|
+| `git-paul` | Al hacer commits, crear ramas, abrir PRs — Gitmoji, PascalCase branches, sin Co-Authored-By Claude |
 | `fastapi` | Al trabajar en `src/api/` — best practices, Pydantic models, patterns actualizados |
 | `python-performance-optimization` | Al optimizar código lento — cProfile, memory profilers, bottlenecks |
 
