@@ -14,7 +14,7 @@ GitHub Issue / mensaje Telegram
         ↓
 Bot (Claude Code remoto)
   → Analiza el repo
-  → Crea rama Analysis/Issue{N}{Slug}
+  → Infiere tipo y crea rama {Tipo}/Issue{N}{Slug}
   → Escribe .agent/planning/sdd.md
   → Escribe .agent/context/files.md
   → Escribe .agent/context/approach.md
@@ -46,7 +46,7 @@ Comando dedicado que ejecuta el workflow SDD completo en un solo paso.
 1. Parsea el input (URL de issue o descripción libre)
 2. Si es URL: lee el issue via `gh issue view`
 3. Determina el repo a analizar (por thread activo o argumento)
-4. Crea rama `Analysis/Issue{N}{DescripcionEnPascalCase}` (ej: `Analysis/Issue5DarkMode`)
+4. Infiere el tipo de rama del issue (`Feat/`, `Fix/`, `Chore/`, etc.) y crea `{Tipo}/Issue{N}{DescripcionEnPascalCase}` (ej: `Feat/Issue5DarkMode`, `Fix/Issue12AuthRedirect`)
 5. Explora el repo: estructura, archivos relevantes, contexto del problema
 6. Escribe bajo `.agent/`:
    - `planning/sdd.md` — spec: qué hay que hacer, criterios de aceptación
@@ -72,7 +72,7 @@ Analizá el repo en {working_dir}.
 Contexto de la tarea: {issue_content}
 
 Instrucciones:
-1. Creá la rama Analysis/Issue{N}{DescripcionEnPascalCase}
+1. Inferí el tipo de trabajo del issue (Feat, Fix, Chore, etc.) y creá la rama `{Tipo}/Issue{N}{DescripcionEnPascalCase}`
 2. Explorá el repo — entendé la estructura y los archivos relevantes
 3. Escribí en .agent/planning/sdd.md el spec completo
 4. Escribí en .agent/context/files.md los archivos relevantes y su rol
@@ -226,16 +226,15 @@ Aplican tanto para el desarrollo de este repo como para los commits que el bot g
 | `Refactor/` | Refactor sin cambio funcional |
 | `Chore/` | Config, deps, mantenimiento |
 | `Docs/` | Solo documentación |
-| `Analysis/` | Ramas SDD generadas por el bot |
-
 **Ejemplos para este repo:**
 - `Feat/SddCommand`
 - `Fix/GitSafetyProtectedBranches`
 - `Feat/VoiceTtsReplies`
 
 **Ejemplos generados por el bot en repos analizados:**
-- `Analysis/Issue5DarkMode`
-- `Analysis/FixAuthRedirect`
+- `Feat/Issue5DarkMode` — issue de nueva feature
+- `Fix/Issue12AuthRedirect` — issue de bug
+- `Chore/Issue8UpdateDeps` — mantenimiento
 
 ### Commits — Gitmoji + imperativo
 
