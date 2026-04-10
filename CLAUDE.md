@@ -28,6 +28,15 @@ Extender el bot para un workflow **SDD (Spec-Driven Development)** donde el bot 
 - Nunca modificar código existente del usuario — solo escribir bajo `.agent/`
 - Al implementar `/sdd`: el bot NO ejecuta el fix, solo documenta
 
+### Skills locales disponibles
+
+Instalados en `.claude/skills/` — Claude Code los carga automáticamente cuando son relevantes:
+
+| Skill | Cuándo se activa |
+|-------|-----------------|
+| `fastapi` | Al trabajar en `src/api/` — best practices, Pydantic models, patterns actualizados |
+| `python-performance-optimization` | Al optimizar código lento — cProfile, memory profilers, bottlenecks |
+
 ### Dev local
 
 ```bash
