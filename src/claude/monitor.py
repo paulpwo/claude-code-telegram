@@ -1,8 +1,9 @@
-"""Bash directory boundary enforcement for Claude tool calls."""
+"""Bash directory boundary enforcement and git safety checks for Claude tool calls."""
 
+import re
 import shlex
 from pathlib import Path
-from typing import Optional, Set, Tuple
+from typing import List, Optional, Set, Tuple
 
 # Subdirectories under ~/.claude/ that Claude Code uses internally.
 _CLAUDE_INTERNAL_SUBDIRS: Set[str] = {"plans", "todos", "settings.json"}
@@ -56,6 +57,22 @@ _FIND_MUTATING_ACTIONS: Set[str] = {"-delete", "-exec", "-execdir", "-ok", "-okd
 
 # Bash command separators
 _COMMAND_SEPARATORS: Set[str] = {"&&", "||", ";", "|", "&"}
+
+# ── Git safety regexes ────────────────────────────────────────────────────────
+# Matches any command that starts with "git"
+_GIT_COMMAND_RE = re.compile(r"^\s*git\s")
+
+# Force push: git push ... --force or -f (flag anywhere in args)
+_GIT_FORCE_PUSH_RE = re.compile(r"^\s*git\s+push\b.*(\s--force\b|\s-f\b)")
+
+# Branch force delete: git branch -D <name>  (uppercase D only)
+_GIT_BRANCH_DELETE_RE = re.compile(r"^\s*git\s+branch\b.*\s-D\b")
+
+# Hard reset: git reset --hard <ref>  — captures the ref token
+_GIT_RESET_HARD_RE = re.compile(r"^\s*git\s+reset\s+--hard\s+(\S+)")
+
+# Push subcommand start — used to extract positional args
+_GIT_PUSH_BRANCH_RE = re.compile(r"^\s*git\s+push\b")
 
 
 def check_bash_directory_boundary(
@@ -138,6 +155,81 @@ def check_bash_directory_boundary(
                 # using bash features we can't statically analyze.
                 # We skip checking this token and rely on the OS-level sandbox.
                 continue
+
+    return True, None
+
+
+def check_git_safety(
+    command: str,
+    protected_branches: List[str],
+    allow_force_push: bool,
+    allow_delete_branch: bool,
+) -> Tuple[bool, Optional[str]]:
+    """Check whether a git command violates configured safety rules.
+
+    Returns:
+        (True, None) if the command is allowed.
+        (False, error_message) if the command is blocked.
+
+    Only Bash tool commands that start with ``git`` are inspected; all other
+    commands pass through immediately.
+    """
+    # Early-exit: not a git command — nothing to check
+    if not _GIT_COMMAND_RE.match(command):
+        return True, None
+
+    # ── Force push ────────────────────────────────────────────────────────────
+    if not allow_force_push and _GIT_FORCE_PUSH_RE.match(command):
+        return False, (
+            "Operación git bloqueada: force-push deshabilitado. "
+            "Configurá GIT_ALLOW_FORCE_PUSH=true para habilitarlo."
+        )
+
+    # ── Force branch delete ───────────────────────────────────────────────────
+    if not allow_delete_branch and _GIT_BRANCH_DELETE_RE.match(command):
+        return False, (
+            "Operación git bloqueada: eliminación forzada de rama (git branch -D) "
+            "deshabilitada. Configurá GIT_ALLOW_DELETE_BRANCH=true para habilitarlo."
+        )
+
+    # ── Push to protected branch ──────────────────────────────────────────────
+    if protected_branches and _GIT_PUSH_BRANCH_RE.match(command):
+        # Tokenise the push command to extract positional (non-flag) args.
+        # git push [<remote>] [<branch>]  — the branch is the last positional arg.
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            tokens = command.split()
+
+        # Drop the leading "git" and "push" tokens
+        push_args = tokens[2:] if len(tokens) > 2 else []
+        positional = [t for t in push_args if not t.startswith("-")]
+
+        # The branch is the last positional arg (after optional remote)
+        candidate = positional[-1] if positional else None
+
+        if candidate:
+            for branch in protected_branches:
+                # Use whitespace-boundary anchors instead of \b so that hyphens
+                # inside branch names (e.g. "my-main-fix") do not produce false
+                # positives.  We compare the whole token instead.
+                if candidate == branch:
+                    return False, (
+                        f"Operación git bloqueada: push a rama protegida '{branch}'. "
+                        f"Las ramas protegidas son: {', '.join(protected_branches)}."
+                    )
+
+    # ── Hard reset to a protected ref ─────────────────────────────────────────
+    reset_match = _GIT_RESET_HARD_RE.match(command)
+    if reset_match:
+        ref = reset_match.group(1)
+        for branch in protected_branches:
+            # Match exact ref or remote/branch forms (e.g. origin/main)
+            if ref == branch or ref.endswith(f"/{branch}"):
+                return False, (
+                    f"Operación git bloqueada: reset --hard a ref protegida '{ref}'. "
+                    f"Las ramas protegidas son: {', '.join(protected_branches)}."
+                )
 
     return True, None
 

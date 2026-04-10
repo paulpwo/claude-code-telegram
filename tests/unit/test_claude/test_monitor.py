@@ -1,4 +1,4 @@
-"""Test bash directory boundary checking."""
+"""Test bash directory boundary checking and git safety."""
 
 from pathlib import Path
 from unittest.mock import patch
@@ -6,6 +6,7 @@ from unittest.mock import patch
 from src.claude.monitor import (
     _is_claude_internal_path,
     check_bash_directory_boundary,
+    check_git_safety,
 )
 
 
@@ -287,3 +288,135 @@ class TestIsClaudeInternalPath:
             bad_file = tmp_path / ".claude" / "secrets" / "key.pem"
             bad_file.touch()
             assert _is_claude_internal_path(str(bad_file)) is False
+
+
+class TestCheckGitSafety:
+    """Tests for the check_git_safety function."""
+
+    _PROTECTED = ["main", "develop", "master"]
+
+    # ── Non-git commands pass through ─────────────────────────────────────────
+
+    def test_non_git_command_passes(self) -> None:
+        ok, err = check_git_safety("ls -la", self._PROTECTED, False, False)
+        assert ok is True
+        assert err is None
+
+    def test_python_command_passes(self) -> None:
+        ok, err = check_git_safety("python script.py", self._PROTECTED, False, False)
+        assert ok is True
+        assert err is None
+
+    # ── Push to protected branch ──────────────────────────────────────────────
+
+    def test_push_to_main_is_blocked(self) -> None:
+        ok, err = check_git_safety(
+            "git push origin main", self._PROTECTED, False, False
+        )
+        assert ok is False
+        assert err is not None
+        assert "main" in err
+
+    def test_push_to_develop_is_blocked(self) -> None:
+        ok, err = check_git_safety(
+            "git push origin develop", self._PROTECTED, False, False
+        )
+        assert ok is False
+        assert "develop" in err
+
+    def test_push_to_feature_branch_is_allowed(self) -> None:
+        ok, err = check_git_safety(
+            "git push origin feature/my-feature", self._PROTECTED, False, False
+        )
+        assert ok is True
+        assert err is None
+
+    def test_push_to_branch_containing_main_as_substring_is_allowed(self) -> None:
+        """'my-main-fix' must NOT be blocked when 'main' is protected."""
+        ok, err = check_git_safety(
+            "git push origin my-main-fix", self._PROTECTED, False, False
+        )
+        assert ok is True
+        assert err is None
+
+    def test_push_to_branch_with_remote_upstream_is_blocked(self) -> None:
+        ok, err = check_git_safety(
+            "git push upstream main", self._PROTECTED, False, False
+        )
+        assert ok is False
+        assert err is not None
+
+    # ── Force push ────────────────────────────────────────────────────────────
+
+    def test_force_push_blocked_by_default(self) -> None:
+        ok, err = check_git_safety(
+            "git push --force origin feature/x", self._PROTECTED, False, False
+        )
+        assert ok is False
+        assert err is not None
+
+    def test_force_push_short_flag_blocked(self) -> None:
+        ok, err = check_git_safety("git push -f", self._PROTECTED, False, False)
+        assert ok is False
+        assert err is not None
+
+    def test_force_push_allowed_when_enabled(self) -> None:
+        ok, err = check_git_safety(
+            "git push --force origin feature/x", self._PROTECTED, True, False
+        )
+        assert ok is True
+        assert err is None
+
+    # ── Branch force delete ───────────────────────────────────────────────────
+
+    def test_branch_force_delete_blocked_by_default(self) -> None:
+        ok, err = check_git_safety(
+            "git branch -D feature/old", self._PROTECTED, False, False
+        )
+        assert ok is False
+        assert err is not None
+
+    def test_branch_soft_delete_always_allowed(self) -> None:
+        ok, err = check_git_safety(
+            "git branch -d feature/old", self._PROTECTED, False, False
+        )
+        assert ok is True
+        assert err is None
+
+    def test_branch_force_delete_allowed_when_enabled(self) -> None:
+        ok, err = check_git_safety(
+            "git branch -D feature/old", self._PROTECTED, False, True
+        )
+        assert ok is True
+        assert err is None
+
+    # ── Hard reset ────────────────────────────────────────────────────────────
+
+    def test_reset_hard_to_protected_ref_blocked(self) -> None:
+        ok, err = check_git_safety(
+            "git reset --hard origin/main", self._PROTECTED, False, False
+        )
+        assert ok is False
+        assert err is not None
+        assert "origin/main" in err
+
+    def test_reset_hard_to_non_protected_ref_allowed(self) -> None:
+        ok, err = check_git_safety(
+            "git reset --hard HEAD~1", self._PROTECTED, False, False
+        )
+        assert ok is True
+        assert err is None
+
+    def test_reset_hard_to_protected_branch_by_name_blocked(self) -> None:
+        ok, err = check_git_safety(
+            "git reset --hard main", self._PROTECTED, False, False
+        )
+        assert ok is False
+        assert err is not None
+
+    # ── Empty protected branches list ─────────────────────────────────────────
+
+    def test_push_with_empty_protected_branches_allowed(self) -> None:
+        ok, err = check_git_safety("git push origin main", [], False, False)
+        assert ok is True
+        assert err is None
