@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Any, List, Literal, Optional
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic.fields import FieldInfo
+from pydantic_settings import BaseSettings, EnvSettingsSource, SettingsConfigDict
 
 from src.utils.constants import (
     DEFAULT_CLAUDE_MAX_COST_PER_REQUEST,
@@ -284,6 +285,26 @@ class Settings(BaseSettings):
         "es-AR-TomasNeural",
         description="edge-tts voice name for TTS synthesis",
     )
+    tts_engine: Literal["edge-tts", "openai", "system"] = Field(
+        "edge-tts",
+        description=(
+            "TTS engine for outgoing voice replies: "
+            "'edge-tts' (default, CLI binary), "
+            "'openai' (OpenAI TTS API, requires OPENAI_API_KEY), "
+            "or 'system' (pyttsx3 offline, requires pip install pyttsx3)"
+        ),
+    )
+    openai_tts_voice: str = Field(
+        "nova",
+        description="OpenAI TTS voice name (used when VOICE_ENGINE=openai)",
+    )
+    system_tts_voice: str = Field(
+        "default",
+        description=(
+            "pyttsx3 voice ID (used when VOICE_ENGINE=system; "
+            "'default' uses the engine default)"
+        ),
+    )
 
     enable_quick_actions: bool = Field(True, description="Enable quick action buttons")
     agentic_mode: bool = Field(
@@ -401,6 +422,38 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore"
     )
+
+    @classmethod
+    def settings_customise_sources(cls, settings_cls, **kwargs):  # type: ignore[override]
+        """Override env sources to handle comma-separated lists (pydantic-settings 2.x).
+
+        pydantic-settings 2.x tries json.loads() on List fields before field_validators run.
+        This override returns the raw string for comma-separated values so the existing
+        parse_protected_branches / parse_int_list validators can split them properly.
+        """
+        from pydantic_settings import DotEnvSettingsSource
+
+        def _patch(source_cls):  # type: ignore[no-untyped-def]
+            class _CommaFriendly(source_cls):  # type: ignore[valid-type]
+                def decode_complex_value(
+                    self, field_name: str, field: FieldInfo, value: Any
+                ) -> Any:
+                    if isinstance(value, str) and not value.strip().startswith(("[", "{")):
+                        return value  # let field_validator handle comma-separated
+                    return super().decode_complex_value(field_name, field, value)
+
+            return _CommaFriendly
+
+        sources = super().settings_customise_sources(settings_cls, **kwargs)
+        patched = []
+        for s in sources:
+            if type(s) is DotEnvSettingsSource:
+                patched.append(_patch(DotEnvSettingsSource)(settings_cls))
+            elif type(s) is EnvSettingsSource:
+                patched.append(_patch(EnvSettingsSource)(settings_cls))
+            else:
+                patched.append(s)
+        return tuple(patched)
 
     @field_validator("allowed_users", "notification_chat_ids", mode="before")
     @classmethod
@@ -547,6 +600,19 @@ class Settings(BaseSettings):
             raise ValueError("voice_reply_mode must be one of ['manual', 'auto']")
         return mode
 
+    @field_validator("tts_engine", mode="before")
+    @classmethod
+    def validate_tts_engine(cls, v: Any) -> str:
+        """Validate and normalize TTS engine selection."""
+        if v is None:
+            return "edge-tts"
+        engine = str(v).strip().lower()
+        if engine not in {"edge-tts", "openai", "system"}:
+            raise ValueError(
+                "tts_engine must be one of ['edge-tts', 'openai', 'system']"
+            )
+        return engine
+
     @field_validator("project_threads_chat_id", mode="before")
     @classmethod
     def validate_project_threads_chat_id(cls, v: Any) -> Optional[int]:
@@ -677,6 +743,15 @@ class Settings(BaseSettings):
         if self.voice_provider == "local":
             return "Local whisper.cpp"
         return "Mistral Voxtral"
+
+    @property
+    def tts_engine_display_name(self) -> str:
+        """Human-friendly label for the configured TTS engine."""
+        if self.tts_engine == "openai":
+            return "OpenAI TTS"
+        if self.tts_engine == "system":
+            return "System TTS (pyttsx3)"
+        return "edge-tts"
 
     @property
     def resolved_whisper_cpp_binary(self) -> str:

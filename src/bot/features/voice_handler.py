@@ -353,19 +353,47 @@ class VoiceHandler:
 
 
 class VoiceSender:
-    """Synthesize outgoing voice replies using edge-tts and send via Telegram sendVoice.
+    """Synthesize outgoing voice replies using a configurable TTS engine.
 
     Complementary to VoiceHandler (STT) — this class handles TTS (text-to-speech).
-    Requires the ``edge-tts`` CLI binary on PATH (``pip install edge-tts``).
+    Supported engines (VOICE_ENGINE env var):
+    - ``edge-tts`` (default): requires the edge-tts CLI binary on PATH
+    - ``openai``: requires OPENAI_API_KEY and ffmpeg
+    - ``system``: requires pyttsx3 (``pip install pyttsx3``) and ffmpeg
     """
 
-    # Maximum seconds to wait for the edge-tts subprocess.
+    # Maximum seconds to wait for TTS subprocess operations.
     TTS_SUBPROCESS_TIMEOUT: int = 60
 
     def __init__(self, config: Settings) -> None:
         self.config = config
+        self._openai_client: Optional[Any] = None
+
+    # -- Dispatcher --
 
     async def _synthesize_ogg(self, text: str, tmp_dir: Path) -> Path:
+        """Dispatch to the configured TTS engine and return an OGG/Opus file path.
+
+        Args:
+            text: The text to synthesize.
+            tmp_dir: Temporary directory for output files.
+
+        Returns:
+            Path to the generated OGG file.
+
+        Raises:
+            RuntimeError: On subprocess failure, timeout, missing binary/dep, or bad config.
+        """
+        if self.config.tts_engine == "openai":
+            return await self._synthesize_ogg_openai(text, tmp_dir)
+        elif self.config.tts_engine == "system":
+            return await self._synthesize_ogg_system(text, tmp_dir)
+        else:  # "edge-tts" default
+            return await self._synthesize_ogg_edge_tts(text, tmp_dir)
+
+    # -- edge-tts engine --
+
+    async def _synthesize_ogg_edge_tts(self, text: str, tmp_dir: Path) -> Path:
         """Run edge-tts to synthesize OGG/Opus audio from text.
 
         Args:
@@ -419,6 +447,161 @@ class VoiceSender:
 
         return ogg_path
 
+    # -- OpenAI engine --
+
+    def _get_openai_tts_client(self) -> Any:
+        """Create and cache an AsyncOpenAI client for TTS on first use."""
+        if self._openai_client is not None:
+            return self._openai_client
+
+        try:
+            from openai import AsyncOpenAI
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "Optional dependency 'openai' is missing for TTS. "
+                "Install voice extras: "
+                'pip install "claude-code-telegram[voice]"'
+            ) from exc
+
+        api_key = self.config.openai_api_key_str
+        if not api_key:
+            raise RuntimeError(
+                "OpenAI API key is not configured. "
+                "Set OPENAI_API_KEY to use the openai TTS engine."
+            )
+
+        self._openai_client = AsyncOpenAI(api_key=api_key)
+        return self._openai_client
+
+    async def _synthesize_ogg_openai(self, text: str, tmp_dir: Path) -> Path:
+        """Synthesize audio via OpenAI TTS API, convert to OGG/Opus via ffmpeg.
+
+        Args:
+            text: The text to synthesize.
+            tmp_dir: Temporary directory for intermediate and output files.
+
+        Returns:
+            Path to the generated OGG file.
+
+        Raises:
+            RuntimeError: On API failure, ffmpeg missing/failure, or missing API key.
+        """
+        client = self._get_openai_tts_client()
+
+        try:
+            response = await client.audio.speech.create(
+                model="tts-1",
+                voice=self.config.openai_tts_voice,
+                input=text,
+            )
+        except Exception as exc:
+            logger.warning(
+                "OpenAI TTS request failed",
+                error_type=type(exc).__name__,
+            )
+            raise RuntimeError("OpenAI TTS request failed.") from exc
+
+        mp3_path = tmp_dir / "reply.mp3"
+        mp3_path.write_bytes(response.content)
+
+        ogg_path = tmp_dir / "reply.ogg"
+        await self._ffmpeg_convert(mp3_path, ogg_path)
+        return ogg_path
+
+    # -- System (pyttsx3) engine --
+
+    async def _synthesize_ogg_system(self, text: str, tmp_dir: Path) -> Path:
+        """Synthesize audio via pyttsx3 (offline), convert to OGG/Opus via ffmpeg.
+
+        pyttsx3.runAndWait() is synchronous — it is wrapped in asyncio.to_thread()
+        to avoid blocking the event loop.
+
+        Args:
+            text: The text to synthesize.
+            tmp_dir: Temporary directory for intermediate and output files.
+
+        Returns:
+            Path to the generated OGG file.
+
+        Raises:
+            RuntimeError: On pyttsx3 missing, ffmpeg missing/failure.
+        """
+        try:
+            import pyttsx3
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "Optional dependency 'pyttsx3' is missing for system TTS. "
+                "Install it with: "
+                'pip install "claude-code-telegram[tts]" or pip install pyttsx3'
+            ) from exc
+
+        wav_path = tmp_dir / "reply.wav"
+        voice_id: Optional[str] = (
+            self.config.system_tts_voice
+            if self.config.system_tts_voice != "default"
+            else None
+        )
+
+        def _run_pyttsx3() -> None:
+            engine = pyttsx3.init()
+            if voice_id is not None:
+                engine.setProperty("voice", voice_id)
+            engine.save_to_file(text, str(wav_path))
+            engine.runAndWait()
+
+        await asyncio.to_thread(_run_pyttsx3)
+
+        ogg_path = tmp_dir / "reply.ogg"
+        await self._ffmpeg_convert(wav_path, ogg_path)
+        return ogg_path
+
+    # -- Shared ffmpeg helper --
+
+    async def _ffmpeg_convert(self, input_path: Path, output_path: Path) -> None:
+        """Convert an audio file to OGG/Opus using ffmpeg.
+
+        Args:
+            input_path: Source audio file (MP3, WAV, etc.).
+            output_path: Destination OGG/Opus file.
+
+        Raises:
+            RuntimeError: On ffmpeg missing, non-zero exit, or timeout.
+        """
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "ffmpeg",
+                "-i",
+                str(input_path),
+                "-c:a",
+                "libopus",
+                str(output_path),
+                "-y",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                _, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=self.TTS_SUBPROCESS_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                raise RuntimeError(
+                    f"ffmpeg conversion timed out after {self.TTS_SUBPROCESS_TIMEOUT}s."
+                )
+
+            if process.returncode != 0:
+                err_msg = stderr.decode(errors="replace")[:300] if stderr else ""
+                raise RuntimeError(
+                    f"ffmpeg conversion failed (exit {process.returncode}): {err_msg}"
+                )
+
+        except FileNotFoundError:
+            raise RuntimeError(
+                "ffmpeg is required for audio conversion but was not found on PATH. "
+                "Install it with: apt install ffmpeg  (or brew install ffmpeg on macOS)"
+            )
+
     async def send_voice_reply(
         self,
         text: str,
@@ -427,8 +610,8 @@ class VoiceSender:
     ) -> bool:
         """Synthesize text as OGG audio and send via Telegram sendVoice.
 
-        Creates a temp directory, synthesizes OGG via edge-tts, sends it,
-        and always cleans up the temp dir (even on failure).
+        Creates a temp directory, synthesizes OGG via the configured TTS engine,
+        sends it, and always cleans up the temp dir (even on failure).
 
         Args:
             text: The text to convert to speech.
@@ -452,7 +635,7 @@ class VoiceSender:
 
             logger.info(
                 "Voice reply sent",
-                voice=self.config.edge_tts_voice,
+                engine=self.config.tts_engine,
                 word_count=len(text.split()),
             )
             return True
