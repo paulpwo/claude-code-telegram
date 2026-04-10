@@ -698,3 +698,67 @@ def test_configuration_error_handling():
                 "APPROVED_DIRECTORY",
             ]:
                 os.environ.pop(key, None)
+
+
+class TestGitSafetySettings:
+    """Test git safety settings defaults and parsing."""
+
+    def test_git_protected_branches_defaults(self, tmp_path: Path) -> None:
+        settings = Settings(
+            telegram_bot_token="test_token",
+            telegram_bot_username="test_bot",
+            approved_directory=str(tmp_path),
+        )
+        assert settings.git_protected_branches == ["main", "develop", "master"]
+
+    def test_git_allow_force_push_defaults_false(self, tmp_path: Path) -> None:
+        settings = Settings(
+            telegram_bot_token="test_token",
+            telegram_bot_username="test_bot",
+            approved_directory=str(tmp_path),
+        )
+        assert settings.git_allow_force_push is False
+
+    def test_git_allow_delete_branch_defaults_false(self, tmp_path: Path) -> None:
+        settings = Settings(
+            telegram_bot_token="test_token",
+            telegram_bot_username="test_bot",
+            approved_directory=str(tmp_path),
+        )
+        assert settings.git_allow_delete_branch is False
+
+    def test_git_protected_branches_comma_string_parsing(self, tmp_path: Path) -> None:
+        settings = Settings(
+            telegram_bot_token="test_token",
+            telegram_bot_username="test_bot",
+            approved_directory=str(tmp_path),
+            git_protected_branches="main, release, staging",
+        )
+        assert settings.git_protected_branches == ["main", "release", "staging"]
+
+    def test_git_protected_branches_list_passthrough(self, tmp_path: Path) -> None:
+        settings = Settings(
+            telegram_bot_token="test_token",
+            telegram_bot_username="test_bot",
+            approved_directory=str(tmp_path),
+            git_protected_branches=["main", "release"],
+        )
+        assert settings.git_protected_branches == ["main", "release"]
+
+    def test_git_allow_force_push_can_be_enabled(self, tmp_path: Path) -> None:
+        settings = Settings(
+            telegram_bot_token="test_token",
+            telegram_bot_username="test_bot",
+            approved_directory=str(tmp_path),
+            git_allow_force_push=True,
+        )
+        assert settings.git_allow_force_push is True
+
+    def test_git_allow_delete_branch_can_be_enabled(self, tmp_path: Path) -> None:
+        settings = Settings(
+            telegram_bot_token="test_token",
+            telegram_bot_username="test_bot",
+            approved_directory=str(tmp_path),
+            git_allow_delete_branch=True,
+        )
+        assert settings.git_allow_delete_branch is True

@@ -87,6 +87,16 @@ class FeatureFlags:
         """Check if streaming drafts via sendMessageDraft is enabled."""
         return self.settings.enable_stream_drafts
 
+    @property
+    def sdd_enabled(self) -> bool:
+        """Check if the /sdd command is enabled."""
+        return self.settings.enable_sdd
+
+    @property
+    def voice_replies_enabled(self) -> bool:
+        """Check if outgoing voice TTS replies are enabled."""
+        return self.settings.enable_voice_replies
+
     def is_feature_enabled(self, feature_name: str) -> bool:
         """Generic feature check by name."""
         feature_map = {
@@ -103,6 +113,8 @@ class FeatureFlags:
             "agentic_mode": self.agentic_mode_enabled,
             "voice_messages": self.voice_messages_enabled,
             "stream_drafts": self.stream_drafts_enabled,
+            "sdd": self.sdd_enabled,
+            "voice_replies": self.voice_replies_enabled,
         }
         return feature_map.get(feature_name, False)
 
@@ -133,4 +145,8 @@ class FeatureFlags:
             features.append("voice_messages")
         if self.stream_drafts_enabled:
             features.append("stream_drafts")
+        if self.sdd_enabled:
+            features.append("sdd")
+        if self.voice_replies_enabled:
+            features.append("voice_replies")
         return features

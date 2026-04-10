@@ -67,6 +67,27 @@ class Settings(BaseSettings):
         description="Allow all Claude tools by bypassing tool validation checks",
     )
 
+    # Git safety
+    git_protected_branches: List[str] = Field(
+        default=["main", "develop", "master"],
+        description="Branches Claude cannot push to or reset --hard on",
+    )
+    git_allow_force_push: bool = Field(
+        False,
+        description="Allow git push --force / -f (default: blocked)",
+    )
+    git_allow_delete_branch: bool = Field(
+        False,
+        description="Allow git branch -D (force-delete) (default: blocked)",
+    )
+
+    # SDD command
+    enable_sdd: bool = Field(True, description="Enable /sdd command")
+    sdd_protected_branches: List[str] = Field(
+        default=["main", "master", "develop"],
+        description="Branches /sdd must never push to",
+    )
+
     # Claude settings
     claude_binary_path: Optional[str] = Field(
         None, description="Path to Claude CLI binary (deprecated)"
@@ -242,6 +263,28 @@ class Settings(BaseSettings):
             "Named models resolve to ~/.cache/whisper-cpp/ggml-{name}.bin"
         ),
     )
+    # Voice TTS (text-to-speech outgoing replies)
+    enable_voice_replies: bool = Field(
+        False, description="Enable outgoing voice note replies via edge-tts"
+    )
+    voice_reply_mode: Literal["manual", "auto"] = Field(
+        "manual",
+        description=(
+            "Voice reply mode: 'manual' (always voice when enabled via /voice on) "
+            "or 'auto' (voice only when reply is short enough)"
+        ),
+    )
+    voice_reply_max_words: int = Field(
+        200,
+        ge=1,
+        le=500,
+        description="Maximum word count for auto voice mode",
+    )
+    edge_tts_voice: str = Field(
+        "es-AR-TomasNeural",
+        description="edge-tts voice name for TTS synthesis",
+    )
+
     enable_quick_actions: bool = Field(True, description="Enable quick action buttons")
     agentic_mode: bool = Field(
         True,
@@ -308,6 +351,31 @@ class Settings(BaseSettings):
     notification_chat_ids: Optional[List[int]] = Field(
         None, description="Default Telegram chat IDs for proactive notifications"
     )
+    # GitHub issues webhook — automatic SDD trigger
+    enable_issue_webhook: bool = Field(
+        False,
+        description=(
+            "Auto-trigger SDD analysis when a GitHub issue is opened or labeled"
+        ),
+    )
+    issue_webhook_require_label: bool = Field(
+        True,
+        description=(
+            "When True, only issues that carry issue_webhook_label are processed"
+        ),
+    )
+    issue_webhook_label: str = Field(
+        "sdd-analyze",
+        description="GitHub label that triggers automatic SDD analysis",
+    )
+    issue_webhook_repo_allowlist: List[str] = Field(
+        default=[],
+        description=(
+            "Repos allowed to trigger analysis (owner/repo format). "
+            "Empty list means all repos are allowed."
+        ),
+    )
+
     enable_project_threads: bool = Field(
         False,
         description="Enable strict routing by Telegram forum project threads",
@@ -358,6 +426,26 @@ class Settings(BaseSettings):
             return [tool.strip() for tool in v.split(",") if tool.strip()]
         if isinstance(v, list):
             return [str(tool) for tool in v]
+        return v  # type: ignore[no-any-return]
+
+    @field_validator("issue_webhook_repo_allowlist", mode="before")
+    @classmethod
+    def parse_repo_allowlist(cls, v: Any) -> List[str]:
+        """Parse comma-separated repo allowlist from env var string."""
+        if isinstance(v, str):
+            return [r.strip() for r in v.split(",") if r.strip()]
+        if isinstance(v, list):
+            return [str(r) for r in v]
+        return v  # type: ignore[no-any-return]
+
+    @field_validator("git_protected_branches", "sdd_protected_branches", mode="before")
+    @classmethod
+    def parse_protected_branches(cls, v: Any) -> List[str]:
+        """Parse comma-separated branch names from env var string."""
+        if isinstance(v, str):
+            return [b.strip() for b in v.split(",") if b.strip()]
+        if isinstance(v, list):
+            return [str(b) for b in v]
         return v  # type: ignore[no-any-return]
 
     @field_validator("approved_directory")
@@ -447,6 +535,17 @@ class Settings(BaseSettings):
                 "voice_provider must be one of ['mistral', 'openai', 'local']"
             )
         return provider
+
+    @field_validator("voice_reply_mode", mode="before")
+    @classmethod
+    def validate_voice_reply_mode(cls, v: Any) -> str:
+        """Validate and normalize voice reply mode."""
+        if v is None:
+            return "manual"
+        mode = str(v).strip().lower()
+        if mode not in {"manual", "auto"}:
+            raise ValueError("voice_reply_mode must be one of ['manual', 'auto']")
+        return mode
 
     @field_validator("project_threads_chat_id", mode="before")
     @classmethod

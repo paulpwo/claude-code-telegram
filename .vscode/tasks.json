@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Check venv",
+      "type": "shell",
+      "command": "test -f ${workspaceFolder}/.venv/bin/python || (echo 'ERROR: .venv not found. Run: python3 -m venv .venv && .venv/bin/pip install -e .[dev]' && exit 1)",
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
