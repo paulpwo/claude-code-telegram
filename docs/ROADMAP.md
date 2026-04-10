@@ -6,12 +6,7 @@ Fork de `RichardAtCT/claude-code-telegram` orientado a un workflow **SDD (Spec-D
 
 ## Contexto y objetivo
 
-El bot reemplaza a OpenClaw como bridge Telegram → Claude Code.
-
-**Por qué se descartó OpenClaw:**
-- Kimi K2 respondía él mismo en vez de delegar a Claude Code
-- Mezclaba idiomas (chino/español) de forma impredecible
-- Acceso shell libre sin granularidad de permisos
+Bridge directo Telegram → Claude Code orientado a un workflow SDD donde el bot actúa como analista técnico remoto.
 
 **El workflow objetivo:**
 ```
