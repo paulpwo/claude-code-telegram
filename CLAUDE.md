@@ -2,6 +2,55 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+---
+
+## Fork Context (paulpwo/claude-code-telegram)
+
+Fork of `RichardAtCT/claude-code-telegram`. Upstream: `https://github.com/RichardAtCT/claude-code-telegram`.
+
+### Objetivo del fork
+
+Extender el bot para un workflow **SDD (Spec-Driven Development)** donde el bot actúa como analista técnico: recibe issues de GitHub o pedidos por Telegram, analiza el repo, crea una rama con el pre-análisis documentado, y notifica al usuario. El usuario baja la rama y ejecuta el fix localmente con Claude Code.
+
+### Mejoras planificadas
+
+| # | Feature | Estado | Archivos clave |
+|---|---------|--------|----------------|
+| 1 | Comando `/sdd` — análisis automático + rama + docs | Pendiente | `src/bot/orchestrator.py`, `src/bot/handlers/sdd_handler.py` |
+| 2 | Git safety — bloqueo de push a ramas protegidas | Pendiente | `src/security/`, `src/config/settings.py` |
+| 3 | GitHub issue polling — análisis automático al crearse issues | Pendiente | `src/scheduler/`, `src/api/` |
+| 4 | Send voice (TTS) — respuestas en nota de voz via edge-tts | Pendiente | `src/bot/features/voice_handler.py` |
+
+### Convenciones del fork
+
+- Cada feature va en su propia rama: `feature/sdd-command`, `feature/git-safety`, etc.
+- Los archivos de análisis que genera el bot van siempre bajo `.agent/` en la raíz del repo analizado
+- Nunca modificar código existente del usuario — solo escribir bajo `.agent/`
+- Al implementar `/sdd`: el bot NO ejecuta el fix, solo documenta
+
+### Dev local
+
+```bash
+# Instalar (venv local, no global)
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+
+# Correr
+.venv/bin/claude-telegram-bot
+
+# Variables de entorno
+cp .env.example .env  # o crear .env manual
+```
+
+### Sync con upstream
+
+```bash
+git fetch upstream
+git merge upstream/main
+```
+
+---
+
 ## Project Overview
 
 Telegram bot providing remote access to Claude Code. Python 3.10+, built with Poetry, using `python-telegram-bot` for Telegram and `claude-agent-sdk` for Claude Code integration.
