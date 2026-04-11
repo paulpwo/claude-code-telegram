@@ -25,7 +25,11 @@ from src.events.handlers import AgentHandler
 from src.events.middleware import EventSecurityMiddleware
 from src.exceptions import ConfigurationError
 from src.notifications.service import NotificationService
-from src.projects import ProjectThreadManager, load_project_registry
+from src.projects import (
+    ProjectThreadManager,
+    load_project_registry,
+    load_project_registry_from_db,
+)
 from src.scheduler.scheduler import JobScheduler
 from src.security.audit import AuditLogger, InMemoryAuditStorage
 from src.security.auth import (
@@ -237,14 +241,17 @@ async def run_application(app: Dict[str, Any]) -> None:
         await bot.initialize()
 
         if config.enable_project_threads:
-            if not config.projects_config_path:
-                raise ConfigurationError(
-                    "Project thread mode enabled but required settings are missing"
+            if config.projects_config_path:
+                registry = load_project_registry(
+                    config_path=config.projects_config_path,
+                    approved_directory=config.approved_directory,
                 )
-            registry = load_project_registry(
-                config_path=config.projects_config_path,
-                approved_directory=config.approved_directory,
-            )
+            else:
+                registry = await load_project_registry_from_db(
+                    repo=storage.projects,
+                    approved_directory=config.approved_directory,
+                    chat_id=config.project_threads_chat_id,
+                )
             project_threads_manager = ProjectThreadManager(
                 registry=registry,
                 repository=storage.project_threads,

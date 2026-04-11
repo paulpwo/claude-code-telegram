@@ -146,7 +146,7 @@ class MessageOrchestrator:
             context.bot_data["settings"] = self.settings
             context.user_data.pop("_thread_context", None)
 
-            is_sync_bypass = handler.__name__ == "sync_threads"
+            is_sync_bypass = handler.__name__ in {"sync_threads", "topics_command"}
             is_start_bypass = handler.__name__ in {"start_command", "agentic_start"}
             message_thread_id = self._extract_message_thread_id(update)
             should_enforce = self.settings.enable_project_threads
@@ -336,6 +336,9 @@ class MessageOrchestrator:
             handlers.append(("voice", self.agentic_voice_command))
         if self.settings.enable_project_threads:
             handlers.append(("sync_threads", command.sync_threads))
+            from .handlers.topics_handler import topics_command
+
+            handlers.append(("topics", topics_command))
         if self.settings.enable_scheduler:
             from .handlers import schedule
 
@@ -446,6 +449,9 @@ class MessageOrchestrator:
         ]
         if self.settings.enable_project_threads:
             handlers.append(("sync_threads", command.sync_threads))
+            from .handlers.topics_handler import topics_command
+
+            handlers.append(("topics", topics_command))
         if self.settings.enable_scheduler:
             from .handlers import schedule
 
@@ -500,6 +506,11 @@ class MessageOrchestrator:
                 )
             if self.settings.enable_project_threads:
                 commands.append(BotCommand("sync_threads", "Sync project topics"))
+                commands.append(
+                    BotCommand(
+                        "topics", "Registrar y gestionar proyectos vinculados a topics"
+                    )
+                )
             if self.settings.enable_scheduler:
                 commands.append(BotCommand("schedule", "Manage scheduled jobs"))
             return commands
@@ -523,6 +534,11 @@ class MessageOrchestrator:
             ]
             if self.settings.enable_project_threads:
                 commands.append(BotCommand("sync_threads", "Sync project topics"))
+                commands.append(
+                    BotCommand(
+                        "topics", "Registrar y gestionar proyectos vinculados a topics"
+                    )
+                )
             if self.settings.enable_scheduler:
                 commands.append(BotCommand("schedule", "Manage scheduled jobs"))
             return commands

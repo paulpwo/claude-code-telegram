@@ -1,10 +1,18 @@
 """YAML-backed project registry for thread mode."""
 
+from __future__ import annotations
+
+import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 import yaml
+
+if TYPE_CHECKING:
+    from src.storage.repositories import ProjectRepository
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -16,6 +24,7 @@ class ProjectDefinition:
     relative_path: Path
     absolute_path: Path
     enabled: bool = True
+    git_url: Optional[str] = None
 
 
 class ProjectRegistry:
@@ -116,6 +125,59 @@ def load_project_registry(
                 relative_path=rel_path,
                 absolute_path=absolute_path,
                 enabled=enabled,
+            )
+        )
+
+    return ProjectRegistry(projects)
+
+
+async def load_project_registry_from_db(
+    repo: "ProjectRepository",
+    approved_directory: Path,
+    chat_id: Optional[int] = None,
+) -> ProjectRegistry:
+    """Load and validate project definitions from the database.
+
+    Args:
+        repo: ProjectRepository instance for DB access
+        approved_directory: Approved base directory for path validation
+        chat_id: If provided, load projects for this chat only.
+                 If None, load all enabled projects.
+
+    Returns:
+        ProjectRegistry built from DB rows with validated paths.
+        Rows whose absolute_path falls outside approved_directory are
+        skipped with a warning.
+    """
+    if chat_id is not None:
+        rows = await repo.list_by_chat(chat_id, enabled_only=True)
+    else:
+        rows = await repo.list_all_enabled()
+
+    approved_root = approved_directory.resolve()
+    projects: List[ProjectDefinition] = []
+
+    for row in rows:
+        abs_path = Path(row.absolute_path).resolve()
+        try:
+            rel_path = abs_path.relative_to(approved_root)
+        except ValueError:
+            logger.warning(
+                "Project path outside approved directory — skipping",
+                project_slug=row.project_slug,
+                absolute_path=row.absolute_path,
+                approved_directory=str(approved_root),
+            )
+            continue
+
+        projects.append(
+            ProjectDefinition(
+                slug=row.project_slug,
+                name=row.name,
+                relative_path=rel_path,
+                absolute_path=abs_path,
+                enabled=row.enabled,
+                git_url=row.git_url,
             )
         )
 

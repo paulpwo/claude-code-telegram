@@ -17,6 +17,7 @@ from .models import (
     AuditLogModel,
     CostTrackingModel,
     MessageModel,
+    ProjectModel,
     ProjectThreadModel,
     SessionModel,
     ToolUsageModel,
@@ -380,6 +381,94 @@ class ProjectThreadRepository:
             cursor = await conn.execute(query, params)
             rows = await cursor.fetchall()
             return [ProjectThreadModel.from_row(row) for row in rows]
+
+
+class ProjectRepository:
+    """Dynamic project registry data access."""
+
+    def __init__(self, db_manager: DatabaseManager):
+        """Initialize repository."""
+        self.db = db_manager
+
+    async def upsert(
+        self,
+        project_slug: str,
+        chat_id: int,
+        name: str,
+        absolute_path: str,
+        git_url: Optional[str] = None,
+        enabled: bool = True,
+    ) -> ProjectModel:
+        """Create or update a project entry."""
+        async with self.db.get_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO projects (
+                    project_slug, chat_id, name, absolute_path, git_url, enabled
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(chat_id, project_slug) DO UPDATE SET
+                    name = excluded.name,
+                    absolute_path = excluded.absolute_path,
+                    git_url = excluded.git_url,
+                    enabled = excluded.enabled,
+                    updated_at = CURRENT_TIMESTAMP
+            """,
+                (project_slug, chat_id, name, absolute_path, git_url, enabled),
+            )
+            await conn.commit()
+
+        result = await self.get_by_slug(project_slug, chat_id)
+        if not result:
+            raise RuntimeError("Failed to upsert project")
+        return result
+
+    async def get_by_slug(
+        self, project_slug: str, chat_id: int
+    ) -> Optional[ProjectModel]:
+        """Find project by slug and chat."""
+        async with self.db.get_connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT * FROM projects
+                WHERE project_slug = ? AND chat_id = ?
+            """,
+                (project_slug, chat_id),
+            )
+            row = await cursor.fetchone()
+            return ProjectModel.from_row(row) if row else None
+
+    async def list_by_chat(
+        self, chat_id: int, enabled_only: bool = True
+    ) -> List[ProjectModel]:
+        """List projects for a chat, ordered by slug."""
+        async with self.db.get_connection() as conn:
+            query = "SELECT * FROM projects WHERE chat_id = ?"
+            params: List = [chat_id]
+            if enabled_only:
+                query += " AND enabled = TRUE"
+            query += " ORDER BY project_slug ASC"
+            cursor = await conn.execute(query, params)
+            rows = await cursor.fetchall()
+            return [ProjectModel.from_row(row) for row in rows]
+
+    async def list_all_enabled(self) -> List[ProjectModel]:
+        """List all enabled projects across all chats."""
+        async with self.db.get_connection() as conn:
+            cursor = await conn.execute(
+                "SELECT * FROM projects WHERE enabled = TRUE ORDER BY project_slug ASC"
+            )
+            rows = await cursor.fetchall()
+            return [ProjectModel.from_row(row) for row in rows]
+
+    async def delete(self, project_slug: str, chat_id: int) -> int:
+        """Delete a project by slug and chat. Returns rowcount (0 if not found)."""
+        async with self.db.get_connection() as conn:
+            cursor = await conn.execute(
+                "DELETE FROM projects WHERE project_slug = ? AND chat_id = ?",
+                (project_slug, chat_id),
+            )
+            await conn.commit()
+            return cursor.rowcount
 
 
 class MessageRepository:

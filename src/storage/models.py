@@ -139,6 +139,44 @@ class ProjectThreadModel:
 
 
 @dataclass
+class ProjectModel:
+    """Dynamic project registry data model."""
+
+    project_slug: str
+    chat_id: int
+    name: str
+    absolute_path: str
+    git_url: Optional[str] = None
+    enabled: bool = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    id: Optional[int] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        data = asdict(self)
+        for key in ["created_at", "updated_at"]:
+            if data[key]:
+                data[key] = data[key].isoformat()
+        return data
+
+    @classmethod
+    def from_row(cls, row: aiosqlite.Row) -> "ProjectModel":
+        """Create from database row."""
+        data = dict(row)
+
+        for field in ["created_at", "updated_at"]:
+            val = data.get(field)
+            if val and isinstance(val, str):
+                data[field] = datetime.fromisoformat(val)
+            elif val and not isinstance(val, datetime):
+                data[field] = _parse_datetime(val)
+        data["enabled"] = bool(data.get("enabled", True))
+
+        return cls(**data)
+
+
+@dataclass
 class MessageModel:
     """Message data model."""
 
