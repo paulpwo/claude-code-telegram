@@ -295,7 +295,7 @@ class Settings(BaseSettings):
         description="Maximum word count for auto voice mode",
     )
     edge_tts_voice: str = Field(
-        "es-AR-TomasNeural",
+        "es-CO-GonzaloNeural",
         description="edge-tts voice name for TTS synthesis",
     )
     tts_engine: Literal["edge-tts", "openai", "system"] = Field(
