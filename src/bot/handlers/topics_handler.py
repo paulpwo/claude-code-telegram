@@ -5,6 +5,7 @@ are persisted in the `projects` table and served via
 `load_project_registry_from_db` at startup (DB-only mode).
 
 Usage:
+  /topics add <slug> [git_url]
   /topics add <slug> <name> <path> [git_url]
   /topics list
   /topics delete <slug>
@@ -27,6 +28,7 @@ logger = structlog.get_logger()
 
 _USAGE = (
     "Usage: /topics &lt;add|list|delete&gt; [args]\n"
+    "/topics add &lt;slug&gt; [git_url]\n"
     "/topics add &lt;slug&gt; &lt;name&gt; &lt;path&gt; [git_url]\n"
     "/topics list\n"
     "/topics delete &lt;slug&gt;"
@@ -63,28 +65,43 @@ _URL_PREFIXES = ("https://", "http://", "git@", "ssh://", "git://")
 def _parse_add_args(
     args: List[str],
 ) -> Optional[tuple[str, str, str, Optional[str]]]:
-    """Parse add subcommand args: slug [name...] path [git_url].
+    """Parse add subcommand args.
 
-    Telegram does not preserve quoted strings — spaces in the name are handled
-    by treating the last arg as git_url (if it looks like a URL), the
-    second-to-last as path, and everything in between as the name.
+    Short form (name and path default to slug):
+      /topics add <slug>
+      /topics add <slug> <git_url>
 
-    Returns (slug, name, path_str, git_url) or None if args are insufficient.
+    Full form (backwards compatible):
+      /topics add <slug> <name> <path> [git_url]
+
+    Returns (slug, name, path_str, git_url) or None if args are empty.
     """
-    if len(args) < 3:
+    if not args:
         return None
 
     slug = args[0]
-    rest = args[1:]  # name parts + path [+ git_url]
+    rest = args[1:]
 
-    # Detect optional git_url at the end
+    # No extra args — name and path both default to slug
+    if not rest:
+        return slug, slug, slug, None
+
+    # One extra arg: either a git_url or a path
+    if len(rest) == 1:
+        if rest[0].startswith(_URL_PREFIXES):
+            return slug, slug, slug, rest[0]
+        else:
+            return slug, slug, rest[0], None
+
+    # Full form: slug [name...] path [git_url]
     git_url: Optional[str] = None
     if rest[-1].startswith(_URL_PREFIXES):
         git_url = rest[-1]
         rest = rest[:-1]
 
     if len(rest) < 2:
-        return None
+        # slug + one non-URL arg remaining — treat as path, name defaults to slug
+        return slug, slug, rest[0], git_url
 
     path_str = rest[-1]
     name = " ".join(rest[:-1])
@@ -94,7 +111,7 @@ def _parse_add_args(
 async def _topics_add(
     update: Update, context: ContextTypes.DEFAULT_TYPE, args: List[str]
 ) -> None:
-    """Handle /topics add <slug> <name> <path> [git_url]."""
+    """Handle /topics add <slug> [git_url] or /topics add <slug> <name> <path> [git_url]."""
     parsed = _parse_add_args(args)
     if parsed is None:
         await update.effective_message.reply_text(
