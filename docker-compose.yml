@@ -1,0 +1,22 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Set to true to compile whisper-cli from source (adds ~400MB, needs more build time)
+        WITH_LOCAL_WHISPER: "false"
+    image: claude-telegram-bot:latest
+    env_file: .env
+    volumes:
+      # SQLite database persistence — matches DATABASE_URL=sqlite:////data/bot.db
+      - ./data:/data
+      # Approved working directory — matches APPROVED_DIRECTORY=/workspace
+      - ./workspace:/workspace
+      # Whisper model files — matches WHISPER_CPP_MODEL_PATH=/models/ggml-medium.bin
+      # (leave empty when VOICE_PROVIDER=mistral or openai)
+      - ./models:/models
+    restart: unless-stopped
+    # Optional: expose API server port when ENABLE_API_SERVER=true
+    # ports:
+    #   - "8080:8080"

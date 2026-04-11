@@ -38,7 +38,11 @@ from .exceptions import (
     ClaudeProcessError,
     ClaudeTimeoutError,
 )
-from .monitor import _is_claude_internal_path, check_bash_directory_boundary
+from .monitor import (
+    _is_claude_internal_path,
+    check_bash_directory_boundary,
+    check_git_safety,
+)
 
 logger = structlog.get_logger()
 
@@ -181,11 +185,13 @@ def _make_can_use_tool_callback(
     security_validator: SecurityValidator,
     working_directory: Path,
     approved_directory: Path,
+    config: Optional[Settings] = None,
 ) -> Any:
     """Create a can_use_tool callback for SDK-level tool permission validation.
 
-    The callback validates file path boundaries and bash directory boundaries
-    *before* the SDK executes the tool, providing preventive security enforcement.
+    The callback validates file path boundaries, bash directory boundaries, and
+    git safety rules *before* the SDK executes the tool, providing preventive
+    security enforcement.
     """
     _FILE_TOOLS = {"Write", "Edit", "Read", "create_file", "edit_file", "read_file"}
     _BASH_TOOLS = {"Bash", "bash", "shell"}
@@ -232,6 +238,25 @@ def _make_can_use_tool_callback(
                     return PermissionResultDeny(
                         message=error or "Bash directory boundary violation"
                     )
+
+                # Git safety validation (after directory boundary check)
+                if config and not config.disable_tool_validation:
+                    git_ok, git_err = check_git_safety(
+                        command,
+                        config.git_protected_branches,
+                        config.git_allow_force_push,
+                        config.git_allow_delete_branch,
+                    )
+                    if not git_ok:
+                        logger.warning(
+                            "can_use_tool denied git operation",
+                            tool_name=tool_name,
+                            command=command,
+                            error=git_err,
+                        )
+                        return PermissionResultDeny(
+                            message=git_err or "Git operation blocked"
+                        )
 
         return PermissionResultAllow()
 
@@ -352,6 +377,7 @@ class ClaudeSDKManager:
                     security_validator=self.security_validator,
                     working_directory=working_directory,
                     approved_directory=self.config.approved_directory,
+                    config=self.config,
                 )
 
             # Resume previous session if we have a session_id
@@ -402,6 +428,29 @@ class ClaudeSDKManager:
                     else:
                         await client.query(prompt)
 
+                    # -------------------------------------------------------------------------
+                    # NOTE: private API usage — intentional, with known trade-off.
+                    #
+                    # We iterate over `client._query.receive_messages()` (private) instead of
+                    # the public `client.receive_messages()` / `client.receive_response()`.
+                    #
+                    # Why: the public methods call `parse_message()` internally and swallow
+                    # `MessageParseError` silently (returning None and skipping). We need
+                    # explicit error logging per skipped message (lines below), which requires
+                    # access to the raw data before parsing.
+                    #
+                    # Equivalent public migration (if the raw-data requirement is dropped):
+                    #   async for message in client.receive_response():
+                    #       ...
+                    #       if isinstance(message, ResultMessage): break  # handled automatically
+                    #
+                    # ⚠ BREAKAGE RISK: `_query` is a private attribute of `ClaudeSDKClient`.
+                    # It is not part of the documented public API:
+                    #   https://code.claude.com/docs/en/agent-sdk/python
+                    # Anthropic may rename, remove, or restructure it in any SDK release
+                    # without a deprecation notice. If this loop stops working after an SDK
+                    # update (`claude-agent-sdk`), this block is the first place to check.
+                    # -------------------------------------------------------------------------
                     async for raw_data in client._query.receive_messages():
                         try:
                             message = parse_message(raw_data)

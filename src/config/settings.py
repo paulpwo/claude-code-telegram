@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Any, List, Literal, Optional
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic.fields import FieldInfo
+from pydantic_settings import BaseSettings, EnvSettingsSource, SettingsConfigDict
 
 from src.utils.constants import (
     DEFAULT_CLAUDE_MAX_COST_PER_REQUEST,
@@ -65,6 +66,27 @@ class Settings(BaseSettings):
     disable_tool_validation: bool = Field(
         False,
         description="Allow all Claude tools by bypassing tool validation checks",
+    )
+
+    # Git safety
+    git_protected_branches: List[str] = Field(
+        default=["main", "develop", "master"],
+        description="Branches Claude cannot push to or reset --hard on",
+    )
+    git_allow_force_push: bool = Field(
+        False,
+        description="Allow git push --force / -f (default: blocked)",
+    )
+    git_allow_delete_branch: bool = Field(
+        False,
+        description="Allow git branch -D (force-delete) (default: blocked)",
+    )
+
+    # SDD command
+    enable_sdd: bool = Field(True, description="Enable /sdd command")
+    sdd_protected_branches: List[str] = Field(
+        default=["main", "master", "develop"],
+        description="Branches /sdd must never push to",
     )
 
     # Claude settings
@@ -242,6 +264,57 @@ class Settings(BaseSettings):
             "Named models resolve to ~/.cache/whisper-cpp/ggml-{name}.bin"
         ),
     )
+    whisper_cpp_language: str = Field(
+        "auto",
+        description=(
+            "Language hint passed to whisper.cpp via -l flag. "
+            "Use a whisper language code ('es', 'en', 'pt', etc.) or 'auto' for "
+            "automatic detection. Auto-detection is unreliable for short utterances "
+            "and may produce output in the wrong language."
+        ),
+    )
+    # Voice TTS (text-to-speech outgoing replies)
+    enable_voice_replies: bool = Field(
+        False, description="Enable outgoing voice note replies via edge-tts"
+    )
+    voice_reply_mode: Literal["manual", "auto"] = Field(
+        "manual",
+        description=(
+            "Voice reply mode: 'manual' (always voice when enabled via /voice on) "
+            "or 'auto' (voice only when reply is short enough)"
+        ),
+    )
+    voice_reply_max_words: int = Field(
+        200,
+        ge=1,
+        le=500,
+        description="Maximum word count for auto voice mode",
+    )
+    edge_tts_voice: str = Field(
+        "es-AR-TomasNeural",
+        description="edge-tts voice name for TTS synthesis",
+    )
+    tts_engine: Literal["edge-tts", "openai", "system"] = Field(
+        "edge-tts",
+        description=(
+            "TTS engine for outgoing voice replies: "
+            "'edge-tts' (default, CLI binary), "
+            "'openai' (OpenAI TTS API, requires OPENAI_API_KEY), "
+            "or 'system' (pyttsx3 offline, requires pip install pyttsx3)"
+        ),
+    )
+    openai_tts_voice: str = Field(
+        "nova",
+        description="OpenAI TTS voice name (used when VOICE_ENGINE=openai)",
+    )
+    system_tts_voice: str = Field(
+        "default",
+        description=(
+            "pyttsx3 voice ID (used when VOICE_ENGINE=system; "
+            "'default' uses the engine default)"
+        ),
+    )
+
     enable_quick_actions: bool = Field(True, description="Enable quick action buttons")
     agentic_mode: bool = Field(
         True,
@@ -308,6 +381,31 @@ class Settings(BaseSettings):
     notification_chat_ids: Optional[List[int]] = Field(
         None, description="Default Telegram chat IDs for proactive notifications"
     )
+    # GitHub issues webhook — automatic SDD trigger
+    enable_issue_webhook: bool = Field(
+        False,
+        description=(
+            "Auto-trigger SDD analysis when a GitHub issue is opened or labeled"
+        ),
+    )
+    issue_webhook_require_label: bool = Field(
+        True,
+        description=(
+            "When True, only issues that carry issue_webhook_label are processed"
+        ),
+    )
+    issue_webhook_label: str = Field(
+        "sdd-analyze",
+        description="GitHub label that triggers automatic SDD analysis",
+    )
+    issue_webhook_repo_allowlist: List[str] = Field(
+        default=[],
+        description=(
+            "Repos allowed to trigger analysis (owner/repo format). "
+            "Empty list means all repos are allowed."
+        ),
+    )
+
     enable_project_threads: bool = Field(
         False,
         description="Enable strict routing by Telegram forum project threads",
@@ -334,6 +432,38 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore"
     )
 
+    @classmethod
+    def settings_customise_sources(cls, settings_cls, **kwargs):  # type: ignore[override]
+        """Override env sources to handle comma-separated lists (pydantic-settings 2.x).
+
+        pydantic-settings 2.x tries json.loads() on List fields before field_validators run.
+        This override returns the raw string for comma-separated values so the existing
+        parse_protected_branches / parse_int_list validators can split them properly.
+        """
+        from pydantic_settings import DotEnvSettingsSource
+
+        def _patch(source_cls):  # type: ignore[no-untyped-def]
+            class _CommaFriendly(source_cls):  # type: ignore[valid-type]
+                def decode_complex_value(
+                    self, field_name: str, field: FieldInfo, value: Any
+                ) -> Any:
+                    if isinstance(value, str) and not value.strip().startswith(("[", "{")):
+                        return value  # let field_validator handle comma-separated
+                    return super().decode_complex_value(field_name, field, value)
+
+            return _CommaFriendly
+
+        sources = super().settings_customise_sources(settings_cls, **kwargs)
+        patched = []
+        for s in sources:
+            if type(s) is DotEnvSettingsSource:
+                patched.append(_patch(DotEnvSettingsSource)(settings_cls))
+            elif type(s) is EnvSettingsSource:
+                patched.append(_patch(EnvSettingsSource)(settings_cls))
+            else:
+                patched.append(s)
+        return tuple(patched)
+
     @field_validator("allowed_users", "notification_chat_ids", mode="before")
     @classmethod
     def parse_int_list(cls, v: Any) -> Optional[List[int]]:
@@ -358,6 +488,26 @@ class Settings(BaseSettings):
             return [tool.strip() for tool in v.split(",") if tool.strip()]
         if isinstance(v, list):
             return [str(tool) for tool in v]
+        return v  # type: ignore[no-any-return]
+
+    @field_validator("issue_webhook_repo_allowlist", mode="before")
+    @classmethod
+    def parse_repo_allowlist(cls, v: Any) -> List[str]:
+        """Parse comma-separated repo allowlist from env var string."""
+        if isinstance(v, str):
+            return [r.strip() for r in v.split(",") if r.strip()]
+        if isinstance(v, list):
+            return [str(r) for r in v]
+        return v  # type: ignore[no-any-return]
+
+    @field_validator("git_protected_branches", "sdd_protected_branches", mode="before")
+    @classmethod
+    def parse_protected_branches(cls, v: Any) -> List[str]:
+        """Parse comma-separated branch names from env var string."""
+        if isinstance(v, str):
+            return [b.strip() for b in v.split(",") if b.strip()]
+        if isinstance(v, list):
+            return [str(b) for b in v]
         return v  # type: ignore[no-any-return]
 
     @field_validator("approved_directory")
@@ -447,6 +597,30 @@ class Settings(BaseSettings):
                 "voice_provider must be one of ['mistral', 'openai', 'local']"
             )
         return provider
+
+    @field_validator("voice_reply_mode", mode="before")
+    @classmethod
+    def validate_voice_reply_mode(cls, v: Any) -> str:
+        """Validate and normalize voice reply mode."""
+        if v is None:
+            return "manual"
+        mode = str(v).strip().lower()
+        if mode not in {"manual", "auto"}:
+            raise ValueError("voice_reply_mode must be one of ['manual', 'auto']")
+        return mode
+
+    @field_validator("tts_engine", mode="before")
+    @classmethod
+    def validate_tts_engine(cls, v: Any) -> str:
+        """Validate and normalize TTS engine selection."""
+        if v is None:
+            return "edge-tts"
+        engine = str(v).strip().lower()
+        if engine not in {"edge-tts", "openai", "system"}:
+            raise ValueError(
+                "tts_engine must be one of ['edge-tts', 'openai', 'system']"
+            )
+        return engine
 
     @field_validator("project_threads_chat_id", mode="before")
     @classmethod
@@ -578,6 +752,15 @@ class Settings(BaseSettings):
         if self.voice_provider == "local":
             return "Local whisper.cpp"
         return "Mistral Voxtral"
+
+    @property
+    def tts_engine_display_name(self) -> str:
+        """Human-friendly label for the configured TTS engine."""
+        if self.tts_engine == "openai":
+            return "OpenAI TTS"
+        if self.tts_engine == "system":
+            return "System TTS (pyttsx3)"
+        return "edge-tts"
 
     @property
     def resolved_whisper_cpp_binary(self) -> str:

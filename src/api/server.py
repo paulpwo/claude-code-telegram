@@ -5,16 +5,22 @@ Receives external webhooks and publishes them as events on the bus.
 """
 
 import uuid
-from typing import Any, Dict, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import structlog
 from fastapi import FastAPI, Header, HTTPException, Request
 
 from ..config.settings import Settings
 from ..events.bus import EventBus
-from ..events.types import WebhookEvent
+from ..events.types import AgentResponseEvent, ScheduledEvent, WebhookEvent
 from ..storage.database import DatabaseManager
 from .auth import verify_github_signature, verify_shared_secret
+from .github_issues import (
+    IssueWebhookFilter,
+    build_issue_sdd_prompt,
+    build_trigger_notification,
+)
 
 logger = structlog.get_logger()
 
@@ -23,8 +29,41 @@ def create_api_app(
     event_bus: EventBus,
     settings: Settings,
     db_manager: Optional[DatabaseManager] = None,
+    working_directory: Optional[Path] = None,
+    notification_chat_ids: Optional[List[int]] = None,
 ) -> FastAPI:
-    """Create the FastAPI application."""
+    """Create the FastAPI application.
+
+    Parameters
+    ----------
+    event_bus:
+        The shared async event bus.
+    settings:
+        Application settings.
+    db_manager:
+        Optional database manager for webhook deduplication.
+    working_directory:
+        Directory passed to Claude when auto-triggering SDD analysis for
+        issue webhooks.  Defaults to ``settings.approved_directory``.
+    notification_chat_ids:
+        Telegram chat IDs to notify when an issue SDD analysis is triggered.
+        Falls back to ``settings.notification_chat_ids`` when None.
+    """
+    _working_directory: Path = working_directory or Path(
+        getattr(settings, "approved_directory", "/tmp")
+    )
+    _chat_ids: List[int] = (
+        notification_chat_ids
+        if notification_chat_ids is not None
+        else (settings.notification_chat_ids or [])
+    )
+
+    issue_filter = IssueWebhookFilter(
+        enabled=settings.enable_issue_webhook,
+        require_label=settings.issue_webhook_require_label,
+        target_label=settings.issue_webhook_label,
+        repo_allowlist=settings.issue_webhook_repo_allowlist,
+    )
 
     app = FastAPI(
         title="Claude Code Telegram - Webhook API",
@@ -128,9 +167,94 @@ def create_api_app(
             event_id=event.id,
         )
 
+        # -- GitHub issues: auto-trigger SDD analysis --
+        if provider == "github":
+            await _maybe_trigger_issue_sdd(
+                event_bus=event_bus,
+                event_type=event_type_name,
+                payload=payload,
+                issue_filter=issue_filter,
+                working_directory=_working_directory,
+                protected_branches=getattr(settings, "sdd_protected_branches", []),
+                chat_ids=_chat_ids,
+                originating_event_id=event.id,
+            )
+
         return {"status": "accepted", "event_id": event.id}
 
     return app
+
+
+async def _maybe_trigger_issue_sdd(
+    event_bus: EventBus,
+    event_type: str,
+    payload: Dict[str, Any],
+    issue_filter: IssueWebhookFilter,
+    working_directory: Path,
+    protected_branches: List[str],
+    chat_ids: List[int],
+    originating_event_id: str,
+) -> None:
+    """Apply filtering and, if the issue qualifies, publish a ScheduledEvent.
+
+    The ScheduledEvent carries a fully-formed SDD prompt.  The existing
+    AgentHandler picks it up and runs Claude, then publishes an
+    AgentResponseEvent that NotificationService delivers to the chat IDs.
+
+    A lightweight notification is also sent *before* Claude starts so the
+    user knows the analysis is in progress.
+    """
+    should_run, reason = issue_filter.should_trigger(event_type, payload)
+    logger.info(
+        "GitHub issue webhook filter result",
+        should_trigger=should_run,
+        reason=reason,
+        event_type=event_type,
+        action=payload.get("action"),
+    )
+    if not should_run:
+        return
+
+    issue_number = (payload.get("issue") or {}).get("number", "?")
+    repo = (payload.get("repository") or {}).get("full_name", "unknown/repo")
+
+    # 1. Send an immediate "analysis started" notification
+    if chat_ids:
+        notification_text = build_trigger_notification(payload)
+        for chat_id in chat_ids:
+            await event_bus.publish(
+                AgentResponseEvent(
+                    chat_id=chat_id,
+                    text=notification_text,
+                    parse_mode="HTML",
+                    originating_event_id=originating_event_id,
+                )
+            )
+
+    # 2. Build the SDD prompt and publish as a ScheduledEvent so AgentHandler
+    #    picks it up and runs Claude.
+    prompt = build_issue_sdd_prompt(
+        payload=payload,
+        working_directory=working_directory,
+        protected_branches=protected_branches,
+    )
+
+    await event_bus.publish(
+        ScheduledEvent(
+            job_id=f"issue-webhook-{repo}-{issue_number}",
+            job_name="github_issue_sdd",
+            prompt=prompt,
+            working_directory=working_directory,
+            target_chat_ids=chat_ids,
+        )
+    )
+
+    logger.info(
+        "SDD analysis triggered from GitHub issue webhook",
+        repo=repo,
+        issue_number=issue_number,
+        chat_ids=chat_ids,
+    )
 
 
 async def _try_record_webhook(

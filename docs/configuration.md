@@ -144,6 +144,12 @@ VOICE_MAX_FILE_SIZE_MB=20            # Max Telegram voice file size to download 
 # Local whisper.cpp settings (only used when VOICE_PROVIDER=local)
 WHISPER_CPP_BINARY_PATH=             # Path to whisper.cpp binary (auto-detected from PATH if unset)
 WHISPER_CPP_MODEL_PATH=base          # Path to GGML model file or model name (base, small, medium, large)
+
+# Voice TTS replies — outgoing voice notes via edge-tts (pip install edge-tts)
+ENABLE_VOICE_REPLIES=false           # Master flag — off by default (opt-in)
+VOICE_REPLY_MODE=manual              # 'manual' (on/off via /voice) or 'auto' (word-count gated)
+VOICE_REPLY_MAX_WORDS=200            # Max words for auto mode (1-500); replies above this → text
+EDGE_TTS_VOICE=es-AR-TomasNeural    # edge-tts voice name (see: edge-tts --list-voices)
 ```
 
 #### Agentic Platform

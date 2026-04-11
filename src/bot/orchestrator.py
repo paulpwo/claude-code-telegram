@@ -318,7 +318,7 @@ class MessageOrchestrator:
 
     def _register_agentic_handlers(self, app: Application) -> None:
         """Register agentic handlers: commands + text/file/photo."""
-        from .handlers import command
+        from .handlers import command, sdd_handler
 
         # Commands
         handlers = [
@@ -328,7 +328,10 @@ class MessageOrchestrator:
             ("verbose", self.agentic_verbose),
             ("repo", self.agentic_repo),
             ("restart", command.restart_command),
+            ("sdd", sdd_handler.sdd_command),
         ]
+        if self.settings.enable_voice_replies:
+            handlers.append(("voice", self.agentic_voice_command))
         if self.settings.enable_project_threads:
             handlers.append(("sync_threads", command.sync_threads))
 
@@ -461,7 +464,12 @@ class MessageOrchestrator:
                 BotCommand("verbose", "Set output verbosity (0/1/2)"),
                 BotCommand("repo", "List repos / switch workspace"),
                 BotCommand("restart", "Restart the bot"),
+                BotCommand("sdd", "Analyze issue & create .agent/ branch"),
             ]
+            if self.settings.enable_voice_replies:
+                commands.append(
+                    BotCommand("voice", "Toggle voice replies (on/off/auto)")
+                )
             if self.settings.enable_project_threads:
                 commands.append(BotCommand("sync_threads", "Sync project topics"))
             return commands
@@ -549,6 +557,8 @@ class MessageOrchestrator:
         context.user_data["claude_session_id"] = None
         context.user_data["session_started"] = True
         context.user_data["force_new_session"] = True
+        # Clear voice reply preference on new session (spec requirement)
+        context.user_data.pop("voice_reply", None)
 
         await update.message.reply_text("Session reset. What's next?")
 
@@ -579,6 +589,112 @@ class MessageOrchestrator:
         await update.message.reply_text(
             f"📂 {dir_display} · Session: {session_status}{cost_str}"
         )
+
+    async def agentic_voice_command(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Handle /voice on|off|auto — toggle outgoing voice note replies.
+
+        Usage:
+            /voice       — show current status
+            /voice on    — always reply with voice notes
+            /voice off   — always reply with text (default)
+            /voice auto  — reply with voice when reply is short enough
+        """
+        if not self.settings.enable_voice_replies:
+            await update.message.reply_text(
+                "Voice replies are disabled. "
+                "Set ENABLE_VOICE_REPLIES=true to enable this feature."
+            )
+            return
+
+        args = update.message.text.split()[1:] if update.message.text else []
+
+        if not args:
+            # Show current status
+            current = context.user_data.get("voice_reply", "off")
+            await update.message.reply_text(
+                f"Voice replies: <b>{current}</b>\n\n"
+                "Usage: <code>/voice on|off|auto</code>\n"
+                "  on   = always send voice notes\n"
+                "  off  = always send text (default)\n"
+                f"  auto = voice when reply ≤ {self.settings.voice_reply_max_words} words",
+                parse_mode="HTML",
+            )
+            return
+
+        arg = args[0].lower().strip()
+        if arg not in {"on", "off", "auto"}:
+            await update.message.reply_text(
+                "Invalid argument. Usage: <code>/voice on|off|auto</code>",
+                parse_mode="HTML",
+            )
+            return
+
+        context.user_data["voice_reply"] = arg
+        labels = {
+            "on": "Voice replies enabled — I'll reply with voice notes.",
+            "off": "Voice replies disabled — I'll reply with text.",
+            "auto": (
+                f"Auto voice mode — voice for replies up to "
+                f"{self.settings.voice_reply_max_words} words."
+            ),
+        }
+        await update.message.reply_text(labels[arg])
+
+    # Keywords that signal the user explicitly wants a voice reply.
+    _VOICE_REQUEST_KEYWORDS: frozenset = frozenset(
+        [
+            # Spanish
+            "en voz",
+            "respondé en audio",
+            "responde en audio",
+            "nota de voz",
+            "mandame un audio",
+            "mándame un audio",
+            "mandame audio",
+            "audio",
+            "voz",
+            "escúchame",
+            "escuchame",
+            # English
+            "voice note",
+            "respond with audio",
+            "send audio",
+            "voice",
+        ]
+    )
+
+    def _user_wants_voice(self, user_message: str) -> bool:
+        """Return True if the user's message contains an explicit voice request."""
+        normalized = user_message.lower()
+        return any(kw in normalized for kw in self._VOICE_REQUEST_KEYWORDS)
+
+    def _should_send_voice(
+        self,
+        context: ContextTypes.DEFAULT_TYPE,
+        response_text: str,
+        user_message: str = "",
+    ) -> bool:
+        """Return True if the reply should be sent as a voice note.
+
+        Logic:
+        - voice_reply == "off"  → always False (default)
+        - voice_reply == "on"   → True only when the user's message explicitly
+                                   requests a voice reply (keyword detection)
+        - voice_reply == "auto" → True when word count of *response* ≤
+                                   voice_reply_max_words, ignoring user intent
+        """
+        if not self.settings.enable_voice_replies:
+            return False
+
+        mode = context.user_data.get("voice_reply", "off")
+        if mode == "on":
+            return self._user_wants_voice(user_message)
+        if mode == "auto":
+            word_count = len(response_text.split())
+            return word_count <= self.settings.voice_reply_max_words
+        return False
 
     def _get_verbose_level(self, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Return effective verbose level: per-user override or global default."""
@@ -1082,9 +1198,35 @@ class MessageOrchestrator:
         # Use MCP-collected images (from send_image_to_user tool calls)
         images: List[ImageAttachment] = mcp_images
 
+        # --- Voice reply path ---
+        # Attempt to send as voice note when user has enabled /voice on|auto.
+        # Only applies when there is a single text message and no image attachments.
+        full_text = (
+            formatted_messages[0].text
+            if len(formatted_messages) == 1 and formatted_messages[0].text
+            else None
+        )
+        voice_sent = False
+        if full_text and not images and self._should_send_voice(
+            context, full_text, user_message=message_text
+        ):
+            features = context.bot_data.get("features")
+            voice_sender = features.get_voice_sender() if features else None
+            if voice_sender:
+                voice_sent = await voice_sender.send_voice_reply(
+                    text=full_text,
+                    update=update,
+                    reply_to_message_id=update.message.message_id,
+                )
+                if not voice_sent:
+                    logger.warning(
+                        "Voice send failed, falling back to text reply",
+                        word_count=len(full_text.split()),
+                    )
+
         # Try to combine text + images in one message when possible
         caption_sent = False
-        if images and len(formatted_messages) == 1:
+        if not voice_sent and images and len(formatted_messages) == 1:
             msg = formatted_messages[0]
             if msg.text and len(msg.text) <= 1024:
                 try:
@@ -1098,8 +1240,8 @@ class MessageOrchestrator:
                 except Exception as img_err:
                     logger.warning("Image+caption send failed", error=str(img_err))
 
-        # Send text messages (skip if caption was already embedded in photos)
-        if not caption_sent:
+        # Send text messages (skip if caption was already embedded in photos or voice was sent)
+        if not voice_sent and not caption_sent:
             for i, message in enumerate(formatted_messages):
                 if not message.text or not message.text.strip():
                     continue
@@ -1501,6 +1643,36 @@ class MessageOrchestrator:
 
         # Use MCP-collected images (from send_image_to_user tool calls).
         images: List[ImageAttachment] = mcp_images_media
+
+        # --- Voice reply path ---
+        # Attempt to send as voice note when user has enabled /voice on|auto.
+        # Only applies when there is a single text message and no image attachments.
+        full_text = (
+            formatted_messages[0].text
+            if len(formatted_messages) == 1 and formatted_messages[0].text
+            else None
+        )
+        voice_sent = False
+        if full_text and not images and self._should_send_voice(
+            context, full_text, user_message=prompt
+        ):
+            features = context.bot_data.get("features")
+            voice_sender = features.get_voice_sender() if features else None
+            if voice_sender:
+                voice_sent = await voice_sender.send_voice_reply(
+                    text=full_text,
+                    update=update,
+                    reply_to_message_id=update.message.message_id,
+                )
+                if not voice_sent:
+                    logger.warning(
+                        "Voice send failed, falling back to text reply",
+                        word_count=len(full_text.split()),
+                    )
+
+        if voice_sent:
+            # Voice note sent successfully — no text reply needed.
+            return
 
         caption_sent = False
         if images and len(formatted_messages) == 1:

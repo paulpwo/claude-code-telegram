@@ -1,0 +1,49 @@
+# Python virtual environment
+.venv/
+
+# Persistent data (mounted as volume at runtime)
+data/
+
+# Test coverage artifacts
+htmlcov/
+.coverage
+.pytest_cache/
+
+# Git history
+.git/
+.gitignore
+
+# Local repos (mounted as volume at runtime)
+repos/
+
+# Compiled Python files
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.egg-info/
+dist/
+build/
+
+# Environment files (injected at runtime via docker-compose env_file)
+.env
+.env.*
+
+# Editor and OS artifacts
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# SDD / agent artifacts
+.agent/
+.agents/
+.atl/
+.claude/worktrees/
+openspec/
+
+# Docs and non-runtime files
+htmlcov/
+docs/
+tests/

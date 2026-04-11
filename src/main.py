@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import logging
+import shutil
 import signal
 import sys
 from pathlib import Path
@@ -366,10 +367,29 @@ async def run_application(app: Dict[str, Any]) -> None:
         logger.info("Application shutdown complete")
 
 
+def _check_claude_cli() -> None:
+    """Fail fast if the Claude Code CLI is not available on PATH.
+
+    claude-agent-sdk invokes ``claude`` as a subprocess. If the binary is
+    missing the bot will fail on the first user message with a cryptic error.
+    Detecting this at startup gives a clear, actionable error message instead.
+    """
+    logger = structlog.get_logger()
+    if shutil.which("claude") is None:
+        logger.error(
+            "claude CLI not found on PATH — claude-agent-sdk requires it. "
+            "Install with: npm install -g @anthropic-ai/claude-code"
+        )
+        sys.exit(1)
+
+
 async def main() -> None:
     """Main application entry point."""
     args = parse_args()
     setup_logging(debug=args.debug)
+
+    # Fail fast if Claude Code CLI is missing (required by claude-agent-sdk)
+    _check_claude_cli()
 
     logger = structlog.get_logger()
     logger.info("Starting Claude Code Telegram Bot", version=__version__)

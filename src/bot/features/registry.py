@@ -16,9 +16,19 @@ from .git_integration import GitIntegration
 from .image_handler import ImageHandler
 from .quick_actions import QuickActionManager
 from .session_export import SessionExporter
-from .voice_handler import VoiceHandler
+from .voice_handler import VoiceHandler, VoiceSender
 
 logger = structlog.get_logger(__name__)
+
+
+def _pyttsx3_importable() -> bool:
+    """Return True if pyttsx3 can be imported (i.e. it is installed)."""
+    try:
+        import pyttsx3  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
 
 
 class FeatureRegistry:
@@ -91,6 +101,46 @@ class FeatureRegistry:
             except Exception as e:
                 logger.error("Failed to initialize voice handler", error=str(e))
 
+        # Voice TTS replies — engine-specific availability check before construction
+        if self.config.enable_voice_replies:
+            tts_available: bool
+            tts_skip_reason: str = ""
+            if self.config.tts_engine == "openai":
+                if self.config.openai_api_key:
+                    tts_available = True
+                else:
+                    tts_available = False
+                    tts_skip_reason = (
+                        "OPENAI_API_KEY is not set (required for tts_engine=openai)"
+                    )
+            elif self.config.tts_engine == "system":
+                if _pyttsx3_importable():
+                    tts_available = True
+                else:
+                    tts_available = False
+                    tts_skip_reason = (
+                        "pyttsx3 is not installed (required for tts_engine=system). "
+                        'Install with: pip install "claude-code-telegram[tts]"'
+                    )
+            else:  # edge-tts — binary checked lazily at call time
+                tts_available = True
+
+            if tts_available:
+                try:
+                    self.features["voice_sender"] = VoiceSender(config=self.config)
+                    logger.info(
+                        "Voice sender (TTS) feature enabled",
+                        engine=self.config.tts_engine,
+                    )
+                except Exception as e:
+                    logger.error("Failed to initialize voice sender", error=str(e))
+            else:
+                logger.warning(
+                    "Voice sender (TTS) disabled — engine dependency unavailable",
+                    engine=self.config.tts_engine,
+                    reason=tts_skip_reason,
+                )
+
         # Conversation enhancements - skip in agentic mode
         if not self.config.agentic_mode:
             try:
@@ -135,6 +185,10 @@ class FeatureRegistry:
     def get_voice_handler(self) -> Optional[VoiceHandler]:
         """Get voice handler feature"""
         return self.get_feature("voice_handler")
+
+    def get_voice_sender(self) -> Optional[VoiceSender]:
+        """Get voice sender (TTS) feature"""
+        return self.get_feature("voice_sender")
 
     def get_conversation_enhancer(self) -> Optional[ConversationEnhancer]:
         """Get conversation enhancer feature"""
