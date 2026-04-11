@@ -10,6 +10,7 @@ Usage:
   /topics delete <slug>
 """
 
+import shutil
 from pathlib import Path
 from typing import List, Optional
 
@@ -238,6 +239,9 @@ async def _topics_delete(
     settings: Settings = context.bot_data["settings"]
     project_repo: ProjectRepository = context.bot_data["storage"].projects
 
+    # Fetch before delete to get the workspace path
+    project = await project_repo.get_by_slug(project_slug=slug, chat_id=chat_id)
+
     rowcount = await project_repo.delete(project_slug=slug, chat_id=chat_id)
     if rowcount == 0:
         await update.effective_message.reply_text(
@@ -245,6 +249,13 @@ async def _topics_delete(
             parse_mode="HTML",
         )
         return
+
+    # Remove cloned workspace directory
+    if project is not None:
+        workspace_path = Path(project.absolute_path)
+        if workspace_path.exists() and workspace_path.is_dir():
+            shutil.rmtree(workspace_path, ignore_errors=True)
+            logger.info("Workspace directory removed", path=str(workspace_path), slug=slug)
 
     # Deactivate the thread mapping
     await context.bot_data["storage"].project_threads.set_active(
