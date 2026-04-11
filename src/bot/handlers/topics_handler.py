@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import structlog
-from telegram import Update
+from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from ...bot.features.git_integration import GitError, GitIntegration
@@ -244,7 +244,7 @@ async def _topics_list(
 async def _topics_delete(
     update: Update, context: ContextTypes.DEFAULT_TYPE, args: List[str]
 ) -> None:
-    """Handle /topics delete <slug>."""
+    """Handle /topics delete <slug> — shows confirmation keyboard."""
     if not args:
         await update.effective_message.reply_text(
             f"❌ <b>Missing slug.</b>\n\n{_USAGE}", parse_mode="HTML"
@@ -253,6 +253,35 @@ async def _topics_delete(
 
     slug = args[0]
     chat_id = update.effective_chat.id
+    project_repo: ProjectRepository = context.bot_data["storage"].projects
+
+    project = await project_repo.get_by_slug(project_slug=slug, chat_id=chat_id)
+    if project is None:
+        await update.effective_message.reply_text(
+            f"❌ <b>Project not found:</b> <code>{slug}</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Confirmar", callback_data=f"topics_del_confirm:{slug}"),
+            InlineKeyboardButton("❌ Cancelar", callback_data=f"topics_del_cancel:{slug}"),
+        ]
+    ])
+    await update.effective_message.reply_text(
+        f"⚠️ ¿Eliminar el proyecto <code>{slug}</code>?\n\n"
+        f"Se borrará del registro y se eliminará el directorio del workspace.",
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
+
+
+async def topics_delete_confirm_callback(
+    query: CallbackQuery, slug: str, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Confirm deletion of a project via inline button."""
+    chat_id = query.message.chat_id
     settings: Settings = context.bot_data["settings"]
     project_repo: ProjectRepository = context.bot_data["storage"].projects
 
@@ -261,7 +290,7 @@ async def _topics_delete(
 
     rowcount = await project_repo.delete(project_slug=slug, chat_id=chat_id)
     if rowcount == 0:
-        await update.effective_message.reply_text(
+        await query.edit_message_text(
             f"❌ <b>Project not found:</b> <code>{slug}</code>",
             parse_mode="HTML",
         )
@@ -288,11 +317,19 @@ async def _topics_delete(
             chat_id=chat_id,
         )
         manager.registry = registry
-        logger.info(
-            "Registry reloaded after /topics delete", slug=slug, chat_id=chat_id
-        )
+        logger.info("Registry reloaded after topics delete confirm", slug=slug, chat_id=chat_id)
 
-    await update.effective_message.reply_text(
-        f"✅ Project <code>{slug}</code> removed.",
+    await query.edit_message_text(
+        f"✅ Proyecto <code>{slug}</code> eliminado.",
+        parse_mode="HTML",
+    )
+
+
+async def topics_delete_cancel_callback(
+    query: CallbackQuery, slug: str, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Cancel deletion of a project via inline button."""
+    await query.edit_message_text(
+        f"↩️ Cancelado. El proyecto <code>{slug}</code> no fue eliminado.",
         parse_mode="HTML",
     )
