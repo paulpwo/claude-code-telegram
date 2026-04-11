@@ -131,16 +131,9 @@ async def _topics_add(
         )
         return
 
-    # If no git_url, path must already exist as a directory
+    # If no git_url: create directory if it doesn't exist
     if git_url is None:
-        if not abs_path.exists() or not abs_path.is_dir():
-            await update.effective_message.reply_text(
-                f"❌ <b>Path does not exist or is not a directory.</b>\n"
-                f"<code>{abs_path}</code>\n\n"
-                "Provide a <code>git_url</code> to clone the repository first.",
-                parse_mode="HTML",
-            )
-            return
+        abs_path.mkdir(parents=True, exist_ok=True)
     else:
         # Clone the repository into abs_path
         from ..features.registry import FeatureRegistry
