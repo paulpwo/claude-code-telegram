@@ -4,6 +4,7 @@ Runs in the same process as the bot, sharing the event loop.
 Receives external webhooks and publishes them as events on the bus.
 """
 
+import hashlib
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -15,7 +16,7 @@ from ..config.settings import Settings
 from ..events.bus import EventBus
 from ..events.types import AgentResponseEvent, ScheduledEvent, WebhookEvent
 from ..storage.database import DatabaseManager
-from .auth import verify_github_signature, verify_shared_secret
+from .auth import verify_github_signature, verify_shared_secret, verify_timestamp
 from .github_issues import (
     IssueWebhookFilter,
     build_issue_sdd_prompt,
@@ -84,6 +85,7 @@ def create_api_app(
         x_github_event: Optional[str] = Header(None),
         x_github_delivery: Optional[str] = Header(None),
         authorization: Optional[str] = Header(None),
+        x_timestamp: Optional[str] = Header(None),
     ) -> Dict[str, str]:
         """Receive and validate webhook from an external provider."""
         body = await request.body()
@@ -119,8 +121,18 @@ def create_api_app(
                 )
             if not verify_shared_secret(authorization, secret):
                 raise HTTPException(status_code=401, detail="Invalid authorization")
+            if not verify_timestamp(x_timestamp):
+                raise HTTPException(
+                    status_code=401, detail="Missing or expired X-Timestamp"
+                )
             event_type_name = request.headers.get("X-Event-Type", "unknown")
-            delivery_id = request.headers.get("X-Delivery-ID", str(uuid.uuid4()))
+            raw_delivery_id = request.headers.get("X-Delivery-ID")
+            if raw_delivery_id:
+                delivery_id = raw_delivery_id
+            else:
+                delivery_id = hashlib.sha256(
+                    f"{provider}:{x_timestamp}:{body[:32].hex()}".encode()
+                ).hexdigest()
 
         # Parse JSON payload
         try:

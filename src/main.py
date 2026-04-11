@@ -34,6 +34,7 @@ from src.scheduler.scheduler import JobScheduler
 from src.security.audit import AuditLogger, InMemoryAuditStorage
 from src.security.auth import (
     AuthenticationManager,
+    DatabaseTokenStorage,
     InMemoryTokenStorage,
     TokenAuthProvider,
     WhitelistAuthProvider,
@@ -113,11 +114,16 @@ async def create_application(config: Settings) -> Dict[str, Any]:
 
     # Add whitelist provider if users are configured
     if config.allowed_users:
-        providers.append(WhitelistAuthProvider(config.allowed_users))
+        providers.append(
+            WhitelistAuthProvider(
+                config.allowed_users,
+                admin_user_ids=config.admin_user_ids,
+            )
+        )
 
     # Add token provider if enabled
     if config.enable_token_auth:
-        token_storage = InMemoryTokenStorage()  # TODO: Use database storage
+        token_storage = DatabaseTokenStorage(storage.db_manager)
         providers.append(TokenAuthProvider(config.auth_token_secret, token_storage))
 
     # Fall back to allowing all users in development mode

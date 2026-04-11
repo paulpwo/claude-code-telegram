@@ -40,26 +40,35 @@ async def security_middleware(
         # Continue without validation (log error but don't block)
         return await handler(event, data)
 
-    # In agentic mode, user text is a prompt to Claude — not a command.
-    # Skip input validation so natural conversation (backticks, paths, etc.) works.
     settings = data.get("settings")
     agentic_mode = getattr(settings, "agentic_mode", False) if settings else False
 
-    # Validate text content if present (classic mode only)
+    # Validate text content if present (all modes)
+    # In agentic mode: log violations but do not block (ToolMonitor enforces downstream)
+    # In classic mode: block on any violation (existing behavior unchanged)
     message = event.effective_message
-    if message and message.text and not agentic_mode:
+    if message and message.text:
         is_safe, violation_type = await validate_message_content(
             message.text, security_validator, user_id, audit_logger
         )
         if not is_safe:
-            await message.reply_text(
-                f"🛡️ <b>Security Alert</b>\n\n"
-                f"Your message contains potentially dangerous content and has been blocked.\n"
-                f"Violation: {escape_html(violation_type)}\n\n"
-                "If you believe this is an error, please contact the administrator.",
-                parse_mode="HTML",
-            )
-            return  # Block processing
+            if agentic_mode:
+                # Audit only — do not block. audit_logger already called inside
+                # validate_message_content; add structlog context here.
+                logger.info(
+                    "Agentic mode: security pattern detected (not blocked)",
+                    user_id=user_id,
+                    violation_type=violation_type,
+                )
+            else:
+                await message.reply_text(
+                    f"🛡️ <b>Security Alert</b>\n\n"
+                    f"Your message contains potentially dangerous content and has been blocked.\n"
+                    f"Violation: {escape_html(violation_type)}\n\n"
+                    "If you believe this is an error, please contact the administrator.",
+                    parse_mode="HTML",
+                )
+                return  # Block processing
 
     # Validate file uploads if present
     if message and message.document:

@@ -2,6 +2,7 @@
 
 import hashlib
 import hmac
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
@@ -110,11 +111,15 @@ class TestWebhookAPI:
         )
         assert response.status_code == 401
 
-        # With valid auth
+        # With valid auth + required X-Timestamp
+        now_ts = str(int(datetime.now(UTC).timestamp()))
         response = client.post(
             "/webhooks/custom",
             json={"data": "test"},
-            headers={"Authorization": "Bearer my-api-secret"},
+            headers={
+                "Authorization": "Bearer my-api-secret",
+                "X-Timestamp": now_ts,
+            },
         )
         assert response.status_code == 200
 
