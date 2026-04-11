@@ -157,7 +157,12 @@ class MessageOrchestrator:
                         is_start_bypass and message_thread_id is None
                     )
                 else:
-                    should_enforce = not is_sync_bypass
+                    is_private_chat = (
+                        getattr(update.effective_chat, "type", "") == "private"
+                        if update.effective_chat
+                        else False
+                    )
+                    should_enforce = not is_sync_bypass and not is_private_chat
 
             if should_enforce:
                 allowed = await self._apply_thread_routing_context(update, context)
