@@ -71,6 +71,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         jq \
         ca-certificates \
+        git \
     && rm -rf /var/lib/apt/lists/*
 
 # Install edge-tts (TTS for voice replies)
