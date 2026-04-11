@@ -334,11 +334,11 @@ class MessageOrchestrator:
         ]
         if self.settings.enable_voice_replies:
             handlers.append(("voice", self.agentic_voice_command))
+        from .handlers.topics_handler import topics_command
+
+        handlers.append(("topics", topics_command))
         if self.settings.enable_project_threads:
             handlers.append(("sync_threads", command.sync_threads))
-            from .handlers.topics_handler import topics_command
-
-            handlers.append(("topics", topics_command))
         if self.settings.enable_scheduler:
             from .handlers import schedule
 
@@ -447,11 +447,11 @@ class MessageOrchestrator:
             ("model", command.model_command),
             ("restart", command.restart_command),
         ]
+        from .handlers.topics_handler import topics_command
+
+        handlers.append(("topics", topics_command))
         if self.settings.enable_project_threads:
             handlers.append(("sync_threads", command.sync_threads))
-            from .handlers.topics_handler import topics_command
-
-            handlers.append(("topics", topics_command))
         if self.settings.enable_scheduler:
             from .handlers import schedule
 
@@ -504,13 +504,13 @@ class MessageOrchestrator:
                 commands.append(
                     BotCommand("voice", "Toggle voice replies (on/off/auto)")
                 )
+            commands.append(
+                BotCommand(
+                    "topics", "Registrar y gestionar proyectos vinculados a topics"
+                )
+            )
             if self.settings.enable_project_threads:
                 commands.append(BotCommand("sync_threads", "Sync project topics"))
-                commands.append(
-                    BotCommand(
-                        "topics", "Registrar y gestionar proyectos vinculados a topics"
-                    )
-                )
             if self.settings.enable_scheduler:
                 commands.append(BotCommand("schedule", "Manage scheduled jobs"))
             return commands
@@ -532,13 +532,13 @@ class MessageOrchestrator:
                 BotCommand("model", "Switch Claude model and effort"),
                 BotCommand("restart", "Restart the bot"),
             ]
+            commands.append(
+                BotCommand(
+                    "topics", "Registrar y gestionar proyectos vinculados a topics"
+                )
+            )
             if self.settings.enable_project_threads:
                 commands.append(BotCommand("sync_threads", "Sync project topics"))
-                commands.append(
-                    BotCommand(
-                        "topics", "Registrar y gestionar proyectos vinculados a topics"
-                    )
-                )
             if self.settings.enable_scheduler:
                 commands.append(BotCommand("schedule", "Manage scheduled jobs"))
             return commands
