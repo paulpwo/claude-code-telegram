@@ -111,10 +111,14 @@ async def _topics_add(
             return
     else:
         # Clone the repository into abs_path
-        git: Optional[GitIntegration] = context.bot_data.get("git_integration")
+        from ..features.registry import FeatureRegistry
+
+        features: FeatureRegistry = context.bot_data["features"]
+        git: Optional[GitIntegration] = features.get_git_integration()
         if git is None:
             await update.effective_message.reply_text(
-                "❌ <b>Git integration is not available.</b>",
+                "❌ <b>Git integration is not available.</b>\n"
+                "Enable it with <code>ENABLE_GIT_INTEGRATION=true</code>.",
                 parse_mode="HTML",
             )
             return
