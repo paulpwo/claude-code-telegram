@@ -319,7 +319,7 @@ class MessageOrchestrator:
 
     def _register_agentic_handlers(self, app: Application) -> None:
         """Register agentic handlers: commands + text/file/photo."""
-        from .handlers import command, sdd_handler
+        from .handlers import callback, command, sdd_handler
 
         # Commands
         handlers = [
@@ -421,6 +421,14 @@ class MessageOrchestrator:
             CallbackQueryHandler(
                 self._inject_deps(self._handle_voice_set_callback),
                 pattern=r"^voice_",
+            )
+        )
+
+        # Topics delete confirmation callbacks
+        app.add_handler(
+            CallbackQueryHandler(
+                self._inject_deps(callback.handle_callback_query),
+                pattern=r"^topics_del_",
             )
         )
 

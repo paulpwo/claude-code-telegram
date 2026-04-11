@@ -13,6 +13,7 @@ from ...security.audit import AuditLogger
 from ...security.validators import SecurityValidator
 from ..utils.html_format import escape_html
 from .command import _handle_model_selection
+from .topics_handler import topics_delete_cancel_callback, topics_delete_confirm_callback
 
 logger = structlog.get_logger()
 
@@ -69,6 +70,8 @@ async def handle_callback_query(
             "export": handle_export_callback,
             "model": lambda q, p, ctx: _handle_model_selection(q, f"model:{p}", ctx),
             "effort": lambda q, p, ctx: _handle_model_selection(q, f"effort:{p}", ctx),
+            "topics_del_confirm": topics_delete_confirm_callback,
+            "topics_del_cancel": topics_delete_cancel_callback,
         }
 
         handler = handlers.get(action)
