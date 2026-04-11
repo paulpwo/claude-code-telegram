@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Bot: Debug",
+      "name": "Bot: Debug (with breakpoints)",
       "type": "debugpy",
       "request": "launch",
       "module": "src.main",
