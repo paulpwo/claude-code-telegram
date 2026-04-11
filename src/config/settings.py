@@ -264,6 +264,15 @@ class Settings(BaseSettings):
             "Named models resolve to ~/.cache/whisper-cpp/ggml-{name}.bin"
         ),
     )
+    whisper_cpp_language: str = Field(
+        "auto",
+        description=(
+            "Language hint passed to whisper.cpp via -l flag. "
+            "Use a whisper language code ('es', 'en', 'pt', etc.) or 'auto' for "
+            "automatic detection. Auto-detection is unreliable for short utterances "
+            "and may produce output in the wrong language."
+        ),
+    )
     # Voice TTS (text-to-speech outgoing replies)
     enable_voice_replies: bool = Field(
         False, description="Enable outgoing voice note replies via edge-tts"

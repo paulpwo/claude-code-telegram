@@ -48,6 +48,7 @@ RUN if [ "$WITH_LOCAL_WHISPER" = "true" ]; then \
       && git clone --depth 1 https://github.com/ggerganov/whisper.cpp /whisper.cpp \
       && cmake -B /whisper.cpp/build -S /whisper.cpp \
            -DCMAKE_BUILD_TYPE=Release \
+           -DBUILD_SHARED_LIBS=OFF \
            -DWHISPER_BUILD_TESTS=OFF \
            -DWHISPER_BUILD_EXAMPLES=ON \
       && cmake --build /whisper.cpp/build --target whisper-cli -j$(nproc) \

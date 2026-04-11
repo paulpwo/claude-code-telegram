@@ -297,7 +297,7 @@ class VoiceHandler:
                 str(wav_path),
                 "--no-timestamps",
                 "-l",
-                "auto",
+                self.config.whisper_cpp_language,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

@@ -130,6 +130,10 @@ dmypy.json
 
 # Project-specific
 data/
+workspace/*
+!workspace/.gitkeep
+models/*
+!models/.gitkeep
 *.db
 *.db-journal
 *.log
