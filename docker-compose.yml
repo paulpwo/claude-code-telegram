@@ -4,19 +4,28 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        # Set to true to compile whisper-cli from source (adds ~400MB, needs more build time)
-        WITH_LOCAL_WHISPER: "false"
-    image: claude-telegram-bot:latest
+        # Set to true to compile whisper-cli from source (VOICE_PROVIDER=local)
+        # Adds ~400MB and significant build time — only needed for offline transcription
+        WITH_LOCAL_WHISPER: "true"
+    image: claude-telegram-bot:local
     env_file: .env
+    environment:
+      # Container-internal paths — override .env host paths when running in Docker.
+      # These match the volume mounts below and must not be changed.
+      APPROVED_DIRECTORY: /workspace
+      WHISPER_CPP_BINARY_PATH: /usr/local/bin/whisper-cli
+      WHISPER_CPP_MODEL_PATH: /models/ggml-medium.bin
     volumes:
       # SQLite database persistence — matches DATABASE_URL=sqlite:////data/bot.db
       - ./data:/data
-      # Approved working directory — matches APPROVED_DIRECTORY=/workspace
+      # Approved working directory — set APPROVED_DIRECTORY=/workspace in .env (or leave as-is, overridden above)
       - ./workspace:/workspace
-      # Whisper model files — matches WHISPER_CPP_MODEL_PATH=/models/ggml-medium.bin
-      # (leave empty when VOICE_PROVIDER=mistral or openai)
+      # Whisper model files — place ggml-medium.bin (or any model) here
+      # Download: https://huggingface.co/ggerganov/whisper.cpp
       - ./models:/models
+      # .env file mounted so pydantic-settings can find it inside the container
+      - ./.env:/app/.env:ro
     restart: unless-stopped
-    # Optional: expose API server port when ENABLE_API_SERVER=true
+    # Uncomment to expose the webhook API server (requires ENABLE_API_SERVER=true)
     # ports:
     #   - "8080:8080"
