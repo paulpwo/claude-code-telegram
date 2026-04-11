@@ -56,20 +56,52 @@ async def topics_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
 
 
+_URL_PREFIXES = ("https://", "http://", "git@", "ssh://", "git://")
+
+
+def _parse_add_args(
+    args: List[str],
+) -> Optional[tuple[str, str, str, Optional[str]]]:
+    """Parse add subcommand args: slug [name...] path [git_url].
+
+    Telegram does not preserve quoted strings — spaces in the name are handled
+    by treating the last arg as git_url (if it looks like a URL), the
+    second-to-last as path, and everything in between as the name.
+
+    Returns (slug, name, path_str, git_url) or None if args are insufficient.
+    """
+    if len(args) < 3:
+        return None
+
+    slug = args[0]
+    rest = args[1:]  # name parts + path [+ git_url]
+
+    # Detect optional git_url at the end
+    git_url: Optional[str] = None
+    if rest[-1].startswith(_URL_PREFIXES):
+        git_url = rest[-1]
+        rest = rest[:-1]
+
+    if len(rest) < 2:
+        return None
+
+    path_str = rest[-1]
+    name = " ".join(rest[:-1])
+    return slug, name, path_str, git_url
+
+
 async def _topics_add(
     update: Update, context: ContextTypes.DEFAULT_TYPE, args: List[str]
 ) -> None:
     """Handle /topics add <slug> <name> <path> [git_url]."""
-    if len(args) < 3:
+    parsed = _parse_add_args(args)
+    if parsed is None:
         await update.effective_message.reply_text(
             f"❌ <b>Missing arguments.</b>\n\n{_USAGE}", parse_mode="HTML"
         )
         return
 
-    slug = args[0]
-    name = args[1]
-    path_str = args[2]
-    git_url: Optional[str] = args[3] if len(args) > 3 else None
+    slug, name, path_str, git_url = parsed
 
     # Must be sent from inside a forum topic
     thread_id: Optional[int] = update.effective_message.message_thread_id
