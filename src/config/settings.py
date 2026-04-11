@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     auth_token_secret: Optional[SecretStr] = Field(
         None, description="Secret for auth tokens"
     )
+    admin_user_ids: List[int] = Field(
+        default_factory=list,
+        description="Telegram user IDs with admin privileges (ADMIN_USER_IDS env var)",
+    )
 
     # Security relaxation (for trusted environments)
     disable_security_patterns: bool = Field(
@@ -464,7 +468,7 @@ class Settings(BaseSettings):
                 patched.append(s)
         return tuple(patched)
 
-    @field_validator("allowed_users", "notification_chat_ids", mode="before")
+    @field_validator("allowed_users", "notification_chat_ids", "admin_user_ids", mode="before")
     @classmethod
     def parse_int_list(cls, v: Any) -> Optional[List[int]]:
         """Parse comma-separated integer lists."""

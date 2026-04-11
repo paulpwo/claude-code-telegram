@@ -62,9 +62,15 @@ class AuthProvider(ABC):
 class WhitelistAuthProvider(AuthProvider):
     """Whitelist-based authentication."""
 
-    def __init__(self, allowed_users: List[int], allow_all_dev: bool = False):
+    def __init__(
+        self,
+        allowed_users: List[int],
+        allow_all_dev: bool = False,
+        admin_user_ids: Optional[List[int]] = None,
+    ):
         self.allowed_users = set(allowed_users)
         self.allow_all_dev = allow_all_dev
+        self.admin_user_ids: set = set(admin_user_ids or [])
         logger.info(
             "Whitelist auth provider initialized",
             allowed_users=len(self.allowed_users),
@@ -82,10 +88,13 @@ class WhitelistAuthProvider(AuthProvider):
     async def get_user_info(self, user_id: int) -> Optional[Dict[str, Any]]:
         """Get user information if whitelisted."""
         if self.allow_all_dev or user_id in self.allowed_users:
+            permissions = ["basic"]
+            if user_id in self.admin_user_ids:
+                permissions.append("admin")
             return {
                 "user_id": user_id,
                 "auth_type": "whitelist" + ("_dev" if self.allow_all_dev else ""),
-                "permissions": ["basic"],
+                "permissions": permissions,
             }
         return None
 
@@ -137,6 +146,72 @@ class InMemoryTokenStorage(TokenStorage):
     async def revoke_token(self, user_id: int) -> None:
         """Remove token from memory."""
         self._tokens.pop(user_id, None)
+
+
+class DatabaseTokenStorage(TokenStorage):
+    """Persistent token storage backed by the SQLite user_tokens table."""
+
+    def __init__(self, db: Any) -> None:
+        self._db = db
+
+    async def store_token(
+        self, user_id: int, token_hash: str, expires_at: datetime
+    ) -> None:
+        """Upsert token; on hash collision update last_used."""
+        async with self._db.get_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO user_tokens (user_id, token_hash, expires_at, is_active)
+                VALUES (?, ?, ?, TRUE)
+                ON CONFLICT(token_hash) DO UPDATE SET
+                    expires_at = excluded.expires_at,
+                    is_active = TRUE,
+                    last_used = CURRENT_TIMESTAMP
+                """,
+                (user_id, token_hash, expires_at),
+            )
+            await conn.commit()
+
+    async def get_user_token(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Return active, non-expired token data, or None."""
+        now = datetime.now(UTC)
+        async with self._db.get_connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT token_id, user_id, token_hash, created_at, expires_at,
+                       last_used, is_active
+                FROM user_tokens
+                WHERE user_id = ?
+                  AND is_active = TRUE
+                  AND (expires_at IS NULL OR expires_at > ?)
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (user_id, now),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        token_id = row[0]
+        async with self._db.get_connection() as conn:
+            await conn.execute(
+                "UPDATE user_tokens SET last_used = ? WHERE token_id = ?",
+                (now, token_id),
+            )
+            await conn.commit()
+        return {
+            "hash": row[2],
+            "created_at": row[3],
+            "expires_at": row[4],
+        }
+
+    async def revoke_token(self, user_id: int) -> None:
+        """Soft-delete: set is_active = FALSE."""
+        async with self._db.get_connection() as conn:
+            await conn.execute(
+                "UPDATE user_tokens SET is_active = FALSE WHERE user_id = ?",
+                (user_id,),
+            )
+            await conn.commit()
 
 
 class TokenAuthProvider(AuthProvider):
@@ -205,8 +280,12 @@ class TokenAuthProvider(AuthProvider):
         return None
 
     def _hash_token(self, token: str) -> str:
-        """Hash token for secure storage."""
-        return hashlib.sha256(f"{token}{self.secret}".encode()).hexdigest()
+        """Hash token for secure storage using scrypt KDF."""
+        secret_bytes = self.secret.encode() if isinstance(self.secret, str) else self.secret
+        salt = secret_bytes[:16].ljust(16, b"\x00")
+        return hashlib.scrypt(
+            token.encode(), salt=salt, n=16384, r=8, p=1, dklen=32
+        ).hex()
 
     def _verify_token(self, token: str, stored_hash: str) -> bool:
         """Verify token against stored hash."""

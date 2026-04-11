@@ -59,3 +59,20 @@ def verify_shared_secret(
 
     token = authorization_header[7:]
     return hmac.compare_digest(token, secret)
+
+
+def verify_timestamp(x_timestamp: Optional[str], window_seconds: int = 300) -> bool:
+    """Reject requests outside a 5-minute window.
+
+    Returns False if header is absent, non-integer, or outside the window.
+    """
+    from datetime import UTC, datetime
+
+    if not x_timestamp:
+        return False
+    try:
+        ts = int(x_timestamp)
+    except (ValueError, TypeError):
+        return False
+    now = int(datetime.now(UTC).timestamp())
+    return abs(now - ts) <= window_seconds
