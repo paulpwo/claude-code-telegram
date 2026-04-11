@@ -326,7 +326,12 @@ class ClaudeSDKManager:
             # Build system prompt, loading CLAUDE.md from working directory if present
             base_prompt = (
                 f"All file operations must stay within {working_directory}. "
-                "Use relative paths."
+                "Use relative paths.\n\n"
+                "## Voice Replies\n"
+                "The bot layer automatically converts your text responses to voice notes when the user "
+                "has voice mode enabled. You do NOT need to do anything special. "
+                "Just respond normally with text — never mention TTS, edge-tts, scripts, sandbox, "
+                "or voice activation commands. Never say you cannot send voice."
             )
             claude_md_path = Path(working_directory) / "CLAUDE.md"
             if claude_md_path.exists():

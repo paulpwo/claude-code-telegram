@@ -7,6 +7,7 @@ classic mode, delegates to existing full-featured handlers.
 
 import asyncio
 import re
+import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -412,6 +413,14 @@ class MessageOrchestrator:
             )
         )
 
+        # Voice set callbacks (voice selection + pagination)
+        app.add_handler(
+            CallbackQueryHandler(
+                self._inject_deps(self._handle_voice_set_callback),
+                pattern=r"^voice_",
+            )
+        )
+
         logger.info("Agentic handlers registered")
 
     def _register_classic_handlers(self, app: Application) -> None:
@@ -614,16 +623,140 @@ class MessageOrchestrator:
             f"📂 {dir_display} · Session: {session_status}{cost_str}"
         )
 
+    # --- Voice set helpers ---
+
+    _VOICE_COUNTRY_FLAGS: dict = {
+        "AR": "🇦🇷", "ES": "🇪🇸", "MX": "🇲🇽", "CO": "🇨🇴",
+        "US": "🇺🇸", "CL": "🇨🇱", "PE": "🇵🇪", "VE": "🇻🇪",
+        "UY": "🇺🇾", "BO": "🇧🇴", "EC": "🇪🇨", "PY": "🇵🇾",
+        "CR": "🇨🇷", "GT": "🇬🇹", "HN": "🇭🇳", "NI": "🇳🇮",
+        "PA": "🇵🇦", "DO": "🇩🇴", "CU": "🇨🇺", "PR": "🇵🇷",
+        "GB": "🇬🇧", "AU": "🇦🇺", "CA": "🇨🇦", "IN": "🇮🇳",
+        "IE": "🇮🇪", "NZ": "🇳🇿", "PH": "🇵🇭", "SG": "🇸🇬",
+        "ZA": "🇿🇦", "DE": "🇩🇪", "FR": "🇫🇷", "IT": "🇮🇹",
+        "BR": "🇧🇷", "PT": "🇵🇹",
+    }
+
+    _VOICES_PER_PAGE: int = 12
+
+    @staticmethod
+    def _voice_display(voice_name: str, gender: str) -> str:
+        """Format 'es-AR-TomasNeural' + 'Male' as '🇦🇷 Tomas ♂'."""
+        parts = voice_name.split("-")
+        country = parts[1] if len(parts) >= 2 else ""
+        raw_name = parts[2].replace("Neural", "") if len(parts) >= 3 else voice_name
+        flag = MessageOrchestrator._VOICE_COUNTRY_FLAGS.get(country, f"[{country}]")
+        gender_icon = "♂" if gender.lower() == "male" else "♀"
+        return f"{flag} {raw_name} {gender_icon}"
+
+    @staticmethod
+    async def _fetch_edge_tts_voices(
+        lang_prefix: str = "es",
+    ) -> list:
+        """Fetch available voices via the edge_tts Python API, filtered by lang_prefix."""
+        try:
+            import edge_tts
+
+            manager = await edge_tts.VoicesManager.create()
+            return [
+                (v["ShortName"], v["Gender"])
+                for v in manager.voices
+                if v["ShortName"].startswith(f"{lang_prefix}-")
+            ]
+        except Exception:
+            return []
+
+    @staticmethod
+    def _voice_set_keyboard(
+        voices: list, page: int, lang_prefix: str
+    ) -> "InlineKeyboardMarkup":
+        """Build a 2-column paginated voice selection keyboard."""
+        vpp = MessageOrchestrator._VOICES_PER_PAGE
+        total = len(voices)
+        total_pages = max(1, (total + vpp - 1) // vpp)
+        page = max(0, min(page, total_pages - 1))
+
+        page_voices = voices[page * vpp: page * vpp + vpp]
+
+        rows = []
+        for i in range(0, len(page_voices), 2):
+            row = []
+            for name, gender in page_voices[i: i + 2]:
+                label = MessageOrchestrator._voice_display(name, gender)
+                row.append(
+                    InlineKeyboardButton(label, callback_data=f"voice_select:{name}")
+                )
+            rows.append(row)
+
+        nav: list = []
+        if page > 0:
+            nav.append(
+                InlineKeyboardButton(
+                    "← Prev", callback_data=f"voice_page:{lang_prefix}:{page - 1}"
+                )
+            )
+        nav.append(
+            InlineKeyboardButton(
+                f"{page + 1}/{total_pages}",
+                callback_data=f"voice_noop",
+            )
+        )
+        if page < total_pages - 1:
+            nav.append(
+                InlineKeyboardButton(
+                    "Next →", callback_data=f"voice_page:{lang_prefix}:{page + 1}"
+                )
+            )
+        if nav:
+            rows.append(nav)
+
+        return InlineKeyboardMarkup(rows)
+
+    async def _handle_voice_set_callback(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Handle voice_select:, voice_page:, and voice_noop callbacks."""
+        query = update.callback_query
+        await query.answer()
+
+        data = query.data or ""
+
+        if data == "voice_noop":
+            return
+
+        if data.startswith("voice_select:"):
+            voice_name = data.split(":", 1)[1]
+            context.user_data["tts_voice_override"] = voice_name
+            display = self._voice_display(voice_name, "")
+            await query.edit_message_text(
+                f"Voice set to <b>{display}</b> (<code>{voice_name}</code>)",
+                parse_mode="HTML",
+            )
+            return
+
+        if data.startswith("voice_page:"):
+            _, lang, page_str = data.split(":", 2)
+            page = int(page_str)
+            voices = await self._fetch_edge_tts_voices(lang)
+            if not voices:
+                await query.edit_message_text("Could not load voice list. Is edge-tts installed?")
+                return
+            kb = self._voice_set_keyboard(voices, page, lang)
+            await query.edit_message_reply_markup(reply_markup=kb)
+
+    # --- /voice command ---
+
     async def agentic_voice_command(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """Handle /voice on|off|auto — toggle outgoing voice note replies.
+        """Handle /voice on|off|auto|set — toggle outgoing voice note replies.
 
         Usage:
             /voice       — show current status
             /voice on    — always reply with voice notes
             /voice off   — always reply with text (default)
-            /voice auto  — reply with voice when reply is short enough
+            /voice auto  — voice when you explicitly ask for it
+            /voice set   — pick a voice from edge-tts (interactive menu)
         """
         if not self.settings.enable_voice_replies:
             await update.message.reply_text(
@@ -637,20 +770,43 @@ class MessageOrchestrator:
         if not args:
             # Show current status
             current = context.user_data.get("voice_reply", "off")
+            current_voice = context.user_data.get(
+                "tts_voice_override", self.settings.edge_tts_voice
+            )
             await update.message.reply_text(
-                f"Voice replies: <b>{current}</b>\n\n"
-                "Usage: <code>/voice on|off|auto</code>\n"
+                f"Voice replies: <b>{current}</b>  ·  Voice: <code>{current_voice}</code>\n\n"
+                "Usage: <code>/voice on|off|auto|set</code>\n"
                 "  on   = always send voice notes\n"
                 "  off  = always send text (default)\n"
-                f"  auto = voice when reply ≤ {self.settings.voice_reply_max_words} words",
+                "  auto = voice when you ask for it (keyword detection)\n"
+                "  set  = pick a voice from the available list",
                 parse_mode="HTML",
             )
             return
 
         arg = args[0].lower().strip()
+
+        if arg == "set":
+            lang = args[1].lower() if len(args) > 1 else "es"
+            await update.message.reply_text("Loading voices…")
+            voices = await self._fetch_edge_tts_voices(lang)
+            if not voices:
+                await update.message.reply_text(
+                    "Could not load voice list. Is <code>edge-tts</code> installed?",
+                    parse_mode="HTML",
+                )
+                return
+            kb = self._voice_set_keyboard(voices, 0, lang)
+            await update.message.reply_text(
+                f"Available <b>{lang.upper()}</b> voices — tap to select:",
+                reply_markup=kb,
+                parse_mode="HTML",
+            )
+            return
+
         if arg not in {"on", "off", "auto"}:
             await update.message.reply_text(
-                "Invalid argument. Usage: <code>/voice on|off|auto</code>",
+                "Invalid argument. Usage: <code>/voice on|off|auto|set</code>",
                 parse_mode="HTML",
             )
             return
@@ -659,10 +815,7 @@ class MessageOrchestrator:
         labels = {
             "on": "Voice replies enabled — I'll reply with voice notes.",
             "off": "Voice replies disabled — I'll reply with text.",
-            "auto": (
-                f"Auto voice mode — voice for replies up to "
-                f"{self.settings.voice_reply_max_words} words."
-            ),
+            "auto": "Auto voice mode — sends voice when you ask for it (e.g. 'nota de voz').",
         }
         await update.message.reply_text(labels[arg])
 
@@ -714,11 +867,10 @@ class MessageOrchestrator:
 
         mode = context.user_data.get("voice_reply", "off")
         if mode == "on":
-            return self._user_wants_voice(user_message)
-        if mode == "auto":
-            word_count = len(response_text.split())
-            return word_count <= self.settings.voice_reply_max_words
-        return False
+            return True  # always voice — user explicitly enabled it
+        # "auto" and "off": honor explicit one-shot voice requests regardless of mode.
+        # "off" means "don't send voice proactively", not "ignore explicit voice requests".
+        return self._user_wants_voice(user_message)
 
     def _get_verbose_level(self, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Return effective verbose level: per-user override or global default."""
@@ -1078,6 +1230,12 @@ class MessageOrchestrator:
 
         verbose_level = self._get_verbose_level(context)
 
+        # Suppress streaming output when voice mode is active — the user will receive
+        # a voice note, so showing intermediate text is noise. Force quiet mode.
+        voice_mode = context.user_data.get("voice_reply", "off")
+        if voice_mode in ("on", "auto") and self.settings.enable_voice_replies:
+            verbose_level = 0
+
         # Create Stop button and interrupt event
         interrupt_event = asyncio.Event()
         stop_kb = InlineKeyboardMarkup(
@@ -1226,12 +1384,20 @@ class MessageOrchestrator:
 
         # --- Voice reply path ---
         # Attempt to send as voice note when user has enabled /voice on|auto.
-        # Only applies when there is a single text message and no image attachments.
-        full_text = (
-            formatted_messages[0].text
-            if len(formatted_messages) == 1 and formatted_messages[0].text
-            else None
-        )
+        # When voice mode is active, join all message parts into one text so that
+        # multi-part Claude responses are still delivered as a single voice note.
+        if not images and self._should_send_voice(
+            context, "", user_message=message_text
+        ):
+            full_text = "\n\n".join(
+                m.text for m in formatted_messages if m.text and m.text.strip()
+            ) or None
+        else:
+            full_text = (
+                formatted_messages[0].text
+                if len(formatted_messages) == 1 and formatted_messages[0].text
+                else None
+            )
         voice_sent = False
         if full_text and not images and self._should_send_voice(
             context, full_text, user_message=message_text
@@ -1243,6 +1409,7 @@ class MessageOrchestrator:
                     text=full_text,
                     update=update,
                     reply_to_message_id=update.message.message_id,
+                    voice_override=context.user_data.get("tts_voice_override"),
                 )
                 if not voice_sent:
                     logger.warning(
@@ -1623,6 +1790,9 @@ class MessageOrchestrator:
         force_new = bool(context.user_data.get("force_new_session"))
 
         verbose_level = self._get_verbose_level(context)
+        voice_mode = context.user_data.get("voice_reply", "off")
+        if voice_mode in ("on", "auto") and self.settings.enable_voice_replies:
+            verbose_level = 0
         tool_log: List[Dict[str, Any]] = []
         mcp_images_media: List[ImageAttachment] = []
         on_stream = self._make_stream_callback(
@@ -1676,12 +1846,20 @@ class MessageOrchestrator:
 
         # --- Voice reply path ---
         # Attempt to send as voice note when user has enabled /voice on|auto.
-        # Only applies when there is a single text message and no image attachments.
-        full_text = (
-            formatted_messages[0].text
-            if len(formatted_messages) == 1 and formatted_messages[0].text
-            else None
-        )
+        # When voice mode is active, join all message parts into one text so that
+        # multi-part Claude responses are still delivered as a single voice note.
+        if not images and self._should_send_voice(
+            context, "", user_message=prompt
+        ):
+            full_text = "\n\n".join(
+                m.text for m in formatted_messages if m.text and m.text.strip()
+            ) or None
+        else:
+            full_text = (
+                formatted_messages[0].text
+                if len(formatted_messages) == 1 and formatted_messages[0].text
+                else None
+            )
         voice_sent = False
         if full_text and not images and self._should_send_voice(
             context, full_text, user_message=prompt
@@ -1693,6 +1871,7 @@ class MessageOrchestrator:
                     text=full_text,
                     update=update,
                     reply_to_message_id=update.message.message_id,
+                    voice_override=context.user_data.get("tts_voice_override"),
                 )
                 if not voice_sent:
                     logger.warning(

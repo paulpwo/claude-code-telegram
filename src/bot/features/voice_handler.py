@@ -371,12 +371,15 @@ class VoiceSender:
 
     # -- Dispatcher --
 
-    async def _synthesize_ogg(self, text: str, tmp_dir: Path) -> Path:
+    async def _synthesize_ogg(
+        self, text: str, tmp_dir: Path, voice_override: Optional[str] = None
+    ) -> Path:
         """Dispatch to the configured TTS engine and return an OGG/Opus file path.
 
         Args:
             text: The text to synthesize.
             tmp_dir: Temporary directory for output files.
+            voice_override: Override the configured voice name (edge-tts only).
 
         Returns:
             Path to the generated OGG file.
@@ -389,62 +392,52 @@ class VoiceSender:
         elif self.config.tts_engine == "system":
             return await self._synthesize_ogg_system(text, tmp_dir)
         else:  # "edge-tts" default
-            return await self._synthesize_ogg_edge_tts(text, tmp_dir)
+            return await self._synthesize_ogg_edge_tts(text, tmp_dir, voice_override=voice_override)
 
     # -- edge-tts engine --
 
-    async def _synthesize_ogg_edge_tts(self, text: str, tmp_dir: Path) -> Path:
-        """Run edge-tts to synthesize OGG/Opus audio from text.
+    async def _synthesize_ogg_edge_tts(
+        self, text: str, tmp_dir: Path, voice_override: Optional[str] = None
+    ) -> Path:
+        """Synthesize OGG/Opus audio via the edge_tts Python API (no subprocess needed).
 
         Args:
             text: The text to synthesize.
             tmp_dir: Temporary directory for the output file.
+            voice_override: Use this voice instead of the configured default.
 
         Returns:
             Path to the generated OGG file.
 
         Raises:
-            RuntimeError: On subprocess failure, timeout, or missing binary.
+            RuntimeError: On synthesis failure or missing dependency.
         """
-        ogg_path = tmp_dir / "reply.ogg"
-        voice = self.config.edge_tts_voice
+        try:
+            import edge_tts
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "Optional dependency 'edge-tts' is missing. "
+                "Install it with: pip install edge-tts"
+            ) from exc
+
+        voice = voice_override or self.config.edge_tts_voice
+        mp3_path = tmp_dir / "reply.mp3"
 
         try:
-            process = await asyncio.create_subprocess_exec(
-                "edge-tts",
-                "--voice",
-                voice,
-                "--text",
-                text,
-                "--write-media",
-                str(ogg_path),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            communicate = edge_tts.Communicate(text, voice)
+            await asyncio.wait_for(
+                communicate.save(str(mp3_path)),
+                timeout=self.TTS_SUBPROCESS_TIMEOUT,
             )
-
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=self.TTS_SUBPROCESS_TIMEOUT,
-                )
-            except asyncio.TimeoutError:
-                process.kill()
-                raise RuntimeError(
-                    f"edge-tts synthesis timed out after {self.TTS_SUBPROCESS_TIMEOUT}s."
-                )
-
-            if process.returncode != 0:
-                err_msg = stderr.decode(errors="replace")[:300] if stderr else ""
-                raise RuntimeError(
-                    f"edge-tts synthesis failed (exit {process.returncode}): {err_msg}"
-                )
-
-        except FileNotFoundError:
+        except asyncio.TimeoutError:
             raise RuntimeError(
-                "edge-tts binary not found on PATH. "
-                "Install it with: pip install edge-tts"
+                f"edge-tts synthesis timed out after {self.TTS_SUBPROCESS_TIMEOUT}s."
             )
+        except Exception as exc:
+            raise RuntimeError(f"edge-tts synthesis failed: {exc}") from exc
 
+        ogg_path = tmp_dir / "reply.ogg"
+        await self._ffmpeg_convert(mp3_path, ogg_path)
         return ogg_path
 
     # -- OpenAI engine --
@@ -607,6 +600,7 @@ class VoiceSender:
         text: str,
         update: Update,
         reply_to_message_id: Optional[int] = None,
+        voice_override: Optional[str] = None,
     ) -> bool:
         """Synthesize text as OGG audio and send via Telegram sendVoice.
 
@@ -617,6 +611,7 @@ class VoiceSender:
             text: The text to convert to speech.
             update: The Telegram Update to reply to.
             reply_to_message_id: Optional message ID to reply to.
+            voice_override: Override the configured voice name (edge-tts only).
 
         Returns:
             True on success, False if any step failed.
@@ -625,7 +620,7 @@ class VoiceSender:
         try:
             tmp_dir = Path(tempfile.mkdtemp(prefix="tts_"))
 
-            ogg_path = await self._synthesize_ogg(text, tmp_dir)
+            ogg_path = await self._synthesize_ogg(text, tmp_dir, voice_override=voice_override)
 
             with open(ogg_path, "rb") as audio_file:
                 await update.message.reply_voice(
