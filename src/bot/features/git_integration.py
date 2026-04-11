@@ -144,6 +144,71 @@ class GitIntegration:
             logger.error(f"Git command error: {e}")
             raise GitError(f"Failed to execute git command: {e}")
 
+    async def clone_repo(
+        self,
+        url: str,
+        dest: Path,
+        timeout: int = 120,
+    ) -> None:
+        """Clone a git repository to dest within the approved directory.
+
+        Args:
+            url: Repository URL (must use https://, git://, ssh://, or git@ scheme)
+            dest: Destination path (must be within approved_directory)
+            timeout: Maximum seconds to wait for the clone operation
+
+        Raises:
+            GitError: If URL scheme is invalid, dest is outside approved_directory,
+                      clone times out, or git exits with a non-zero return code
+        """
+        # Validate URL scheme
+        valid_prefixes = ("https://", "git://", "ssh://", "git@")
+        if not any(url.startswith(prefix) for prefix in valid_prefixes):
+            raise GitError(
+                "Invalid URL scheme: only https, ssh and git@ are allowed"
+            )
+
+        # Validate destination is within approved directory
+        try:
+            dest_resolved = dest.resolve()
+            dest_resolved.relative_to(self.approved_dir.resolve())
+        except ValueError:
+            raise GitError("Destination outside approved directory")
+
+        # Execute git clone
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "git",
+                "clone",
+                url,
+                str(dest_resolved),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                try:
+                    process.kill()
+                    await process.communicate()
+                except Exception:
+                    pass
+                raise GitError("Clone timed out")
+
+            if process.returncode != 0:
+                raise GitError(
+                    f"Git clone failed: {stderr.decode(errors='replace').strip()}"
+                )
+
+        except GitError:
+            raise
+        except Exception as e:
+            logger.error(f"Git clone error: {e}")
+            raise GitError(f"Failed to clone repository: {e}")
+
     async def get_status(self, repo_path: Path) -> GitStatus:
         """Get repository status.
 

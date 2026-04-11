@@ -668,10 +668,8 @@ class Settings(BaseSettings):
                     "project_threads_chat_id required when "
                     "project_threads_mode is 'group'"
                 )
-            if not self.projects_config_path:
-                raise ValueError(
-                    "projects_config_path required when enable_project_threads is True"
-                )
+            # projects_config_path is optional — DB-only mode is valid
+            # (load_project_registry_from_db is used at startup when unset)
 
         return self
 

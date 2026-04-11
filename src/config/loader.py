@@ -127,11 +127,7 @@ def _validate_config(settings: Settings) -> None:
             raise InvalidConfigError(
                 "Project thread mode is 'group' but no project_threads_chat_id provided"
             )
-        if not settings.projects_config_path:
-            raise InvalidConfigError(
-                "Project thread mode enabled but no projects_config_path provided"
-            )
-        if not settings.projects_config_path.exists():
+        if settings.projects_config_path and not settings.projects_config_path.exists():
             raise InvalidConfigError(
                 f"Projects config not found: {settings.projects_config_path}"
             )

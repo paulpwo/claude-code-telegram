@@ -310,6 +310,27 @@ class DatabaseManager:
                     ON project_threads(project_slug);
                 """,
             ),
+            (
+                5,
+                """
+                -- Dynamic project registry for /topics command
+                CREATE TABLE IF NOT EXISTS projects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_slug TEXT NOT NULL,
+                    chat_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    absolute_path TEXT NOT NULL,
+                    git_url TEXT,
+                    enabled BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(chat_id, project_slug)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_projects_chat_active
+                    ON projects(chat_id, enabled);
+                """,
+            ),
         ]
 
     async def _init_pool(self):
