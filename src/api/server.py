@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 import structlog
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
 
 from ..config.settings import Settings
 from ..events.bus import EventBus
@@ -74,6 +75,30 @@ def create_api_app(
         docs_url="/docs" if settings.development_mode else None,
         redoc_url=None,
     )
+
+    # Store shared state on the app so admin endpoints can access it without
+    # circular imports. scheduler is populated later by main.py after start().
+    app.state.db_manager = db_manager
+    app.state.settings = settings
+    app.state.scheduler = None  # populated by main.py after scheduler.start()
+
+    # Admin dashboard: mount router + SPA static files (if configured)
+    if settings.admin_password and settings.admin_jwt_secret:
+        from .admin.router import create_admin_router
+
+        app.include_router(create_admin_router(), prefix="/api/admin")
+        dist_path = Path(__file__).parent.parent / "admin" / "dist"
+        app.mount(
+            "/admin",
+            StaticFiles(directory=str(dist_path), html=True, check_dir=False),
+            name="admin",
+        )
+        logger.info("Admin dashboard enabled", dist_path=str(dist_path))
+    else:
+        logger.debug(
+            "Admin dashboard disabled "
+            "(set ADMIN_PASSWORD and ADMIN_JWT_SECRET to enable)"
+        )
 
     @app.get("/health")
     async def health_check() -> Dict[str, str]:

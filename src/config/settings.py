@@ -420,6 +420,24 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Admin dashboard
+    admin_password: Optional[SecretStr] = Field(
+        None,
+        description="Admin panel password (ADMIN_PASSWORD). Enables /api/admin/* routes.",
+    )
+    admin_jwt_secret: Optional[SecretStr] = Field(
+        None,
+        description=(
+            "JWT signing secret for admin panel (ADMIN_JWT_SECRET). "
+            "Must be at least 32 characters."
+        ),
+    )
+    admin_jwt_ttl_minutes: int = Field(
+        60,
+        description="Admin JWT token lifetime in minutes (ADMIN_JWT_TTL_MINUTES)",
+        ge=1,
+    )
+
     enable_project_threads: bool = Field(
         False,
         description="Enable strict routing by Telegram forum project threads",

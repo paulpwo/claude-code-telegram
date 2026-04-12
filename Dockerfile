@@ -2,6 +2,7 @@
 # Claude Code Telegram Bot — Multi-stage Dockerfile
 #
 # Stages:
+#   admin-builder   — builds Vite + React admin SPA
 #   builder         — installs Python deps into /install prefix
 #   node-builder    — installs Claude Code CLI via npm (isolated)
 #   whisper-builder — (opt-in) compiles whisper-cli from source
@@ -9,6 +10,23 @@
 
 ARG PYTHON_VERSION=3.11
 ARG WITH_LOCAL_WHISPER=false
+
+# =============================================================================
+# Stage 0: admin-builder — Vite + React admin SPA
+# =============================================================================
+FROM node:lts-slim AS admin-builder
+
+WORKDIR /admin
+
+# Install deps first (layer cache)
+COPY src/admin/package.json src/admin/package-lock.json* ./
+
+RUN npm ci
+
+# Copy source and build
+COPY src/admin/ ./
+
+RUN npm run build
 
 # =============================================================================
 # Stage 1: builder — Python deps via pip
@@ -89,6 +107,9 @@ COPY --from=node-builder /usr/local/bin/claude /usr/local/bin/claude
 COPY --from=whisper-builder /usr/local/bin/whisper-cli /usr/local/bin/whisper-cli
 
 WORKDIR /app
+
+# Copy admin SPA build from admin-builder stage
+COPY --from=admin-builder /admin/dist ./src/admin/dist
 
 # Copy application source
 COPY src/ ./src/
