@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional
 
 import structlog
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse as _FileResponse
 
 from ..config.settings import Settings
 from ..events.bus import EventBus
@@ -74,6 +76,43 @@ def create_api_app(
         docs_url="/docs" if settings.development_mode else None,
         redoc_url=None,
     )
+
+    # Store shared state on the app so admin endpoints can access it without
+    # circular imports. scheduler is populated later by main.py after start().
+    app.state.db_manager = db_manager
+    app.state.settings = settings
+    app.state.scheduler = None  # populated by main.py after scheduler.start()
+
+    # Admin dashboard: mount router + SPA static files (if configured)
+    if settings.admin_password and settings.admin_jwt_secret:
+        from .admin.router import create_admin_router
+
+        app.include_router(create_admin_router(), prefix="/api/admin")
+        dist_path = Path(__file__).parent.parent / "admin" / "dist"
+
+        # Serve built Vite assets (hashed filenames, safe to cache)
+        assets_path = dist_path / "assets"
+        if assets_path.exists():
+            app.mount(
+                "/admin/assets",
+                StaticFiles(directory=str(assets_path)),
+                name="admin-assets",
+            )
+
+        # SPA catch-all: any /admin/* path that isn't an API route serves index.html
+        index_html = dist_path / "index.html"
+
+        @app.get("/admin", include_in_schema=False)
+        @app.get("/admin/{rest_of_path:path}", include_in_schema=False)
+        async def serve_admin_spa(rest_of_path: str = "") -> _FileResponse:  # noqa: RUF029
+            return _FileResponse(str(index_html))
+
+        logger.info("Admin dashboard enabled", dist_path=str(dist_path))
+    else:
+        logger.debug(
+            "Admin dashboard disabled "
+            "(set ADMIN_PASSWORD and ADMIN_JWT_SECRET to enable)"
+        )
 
     @app.get("/health")
     async def health_check() -> Dict[str, str]:

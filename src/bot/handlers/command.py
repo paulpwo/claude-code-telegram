@@ -259,22 +259,13 @@ async def sync_threads(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         target_chat_id = settings.project_threads_chat_id
 
     try:
-        if not settings.projects_config_path:
-            await status_msg.edit_text(
-                "❌ <b>Project thread mode is misconfigured</b>\n\n"
-                "Set <code>PROJECTS_CONFIG_PATH</code> to a valid YAML file.",
-                parse_mode="HTML",
+        if settings.projects_config_path:
+            registry = load_project_registry(
+                config_path=settings.projects_config_path,
+                approved_directory=settings.approved_directory,
             )
-            if audit_logger:
-                await audit_logger.log_command(user_id, "sync_threads", [], False)
-            return
-
-        registry = load_project_registry(
-            config_path=settings.projects_config_path,
-            approved_directory=settings.approved_directory,
-        )
-        manager.registry = registry
-        context.bot_data["project_registry"] = registry
+            manager.registry = registry
+            context.bot_data["project_registry"] = registry
 
         result = await manager.sync_topics(context.bot, chat_id=target_chat_id)
         await status_msg.edit_text(

@@ -153,3 +153,7 @@ config/mcp.json
 
 repos/*
 !repos/.gitkeep
+
+# Admin SPA build artifacts
+src/admin/dist/
+src/admin/node_modules/

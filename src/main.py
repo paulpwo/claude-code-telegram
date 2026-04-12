@@ -311,13 +311,28 @@ async def run_application(app: Dict[str, Any]) -> None:
         bot_task = asyncio.create_task(bot.start())
         tasks.append(bot_task)
 
-        # API server (if enabled)
+        # API server (if enabled) — capture the app instance so we can wire
+        # the scheduler into app.state after it starts.
+        api_app_instance = None
         if features.api_server_enabled:
-            from src.api.server import run_api_server
+            from src.api.server import create_api_app, run_api_server
 
-            api_task = asyncio.create_task(
-                run_api_server(event_bus, config, storage.db_manager)
-            )
+            # Build the FastAPI app first so we have a reference to app.state
+            api_app_instance = create_api_app(event_bus, config, storage.db_manager)
+
+            async def _run_api() -> None:
+                import uvicorn
+
+                uvicorn_config = uvicorn.Config(
+                    app=api_app_instance,
+                    host="0.0.0.0",
+                    port=config.api_server_port,
+                    log_level="info" if not config.debug else "debug",
+                )
+                server = uvicorn.Server(uvicorn_config)
+                await server.serve()
+
+            api_task = asyncio.create_task(_run_api())
             tasks.append(api_task)
             logger.info("API server enabled", port=config.api_server_port)
 
@@ -330,6 +345,10 @@ async def run_application(app: Dict[str, Any]) -> None:
             )
             await scheduler.start()
             bot.deps["scheduler"] = scheduler
+            # Wire scheduler into FastAPI app.state so admin endpoints can
+            # introspect jobs without circular imports.
+            if api_app_instance is not None:
+                api_app_instance.state.scheduler = scheduler
             logger.info("Job scheduler enabled")
 
         # Shutdown task

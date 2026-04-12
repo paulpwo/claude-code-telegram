@@ -163,10 +163,10 @@ async def load_project_registry_from_db(
             rel_path = abs_path.relative_to(approved_root)
         except ValueError:
             logger.warning(
-                "Project path outside approved directory — skipping",
-                project_slug=row.project_slug,
-                absolute_path=row.absolute_path,
-                approved_directory=str(approved_root),
+                "Project path outside approved directory — skipping: %s at %s (approved: %s)",
+                row.project_slug,
+                row.absolute_path,
+                str(approved_root),
             )
             continue
 
