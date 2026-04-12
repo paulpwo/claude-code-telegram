@@ -91,35 +91,6 @@ Los scripts de voz están en `scripts/voice/` (copiados a `/app/scripts/voice/` 
 - `scripts/voice/text-to-voice.sh` — TTS con edge-tts
 - `scripts/voice/send-voice-telegram.sh` — envío de nota de voz via Telegram API
 
-### Deploy a producción (EC2)
-
-La infra y scripts de deploy están en el repo hermano: `/Users/developer/Documents/1paul/ClaudeCodeTelegramBotDeploy/`
-
-| Recurso | Valor |
-|---------|-------|
-| **Instancia EC2** | `i-0eef6e30daf1a4e3b` (us-east-1) |
-| **IP elástica** | `3.94.235.48` |
-| **SSH** | `ssh -i ~/.ssh/id_ed25519_agent ubuntu@3.94.235.48` |
-| **AWS Profile** | `agent-pw` (**nunca** usar `default`, es otra cuenta) |
-| **GitHub Action** | `.github/workflows/deploy.yml` — se dispara automático con push a `main` |
-
-**Encender/apagar instancia:**
-
-```bash
-aws ec2 start-instances --instance-ids i-0eef6e30daf1a4e3b --region us-east-1 --profile agent-pw
-aws ec2 stop-instances --instance-ids i-0eef6e30daf1a4e3b --region us-east-1 --profile agent-pw
-```
-
-**Re-disparar deploy manualmente:**
-
-```bash
-gh workflow run deploy.yml --repo paulpwo/claude-code-telegram
-```
-
-**Scheduler automático (EventBridge):**
-- Apaga: 00:00 COT todos los días
-- Prende: 07:00 COT Lun-Sáb (domingos NO prende)
-
 ### Sync con upstream
 
 ```bash
