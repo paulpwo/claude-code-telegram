@@ -136,16 +136,16 @@ def test_build_sdd_prompt_working_dir_in_prompt():
 
 
 def test_build_sdd_prompt_contains_agent_file_instructions():
-    """Prompt instructs Claude to write all three .agent/ files."""
+    """Prompt instructs Claude to write all three .agent/<Type>/<BranchSlug>/ files."""
     prompt = _build_sdd_prompt(
         arg="Some task",
         working_dir=Path("/repo"),
         protected_branches=["main"],
         is_url=False,
     )
-    assert ".agent/planning/sdd.md" in prompt
-    assert ".agent/context/files.md" in prompt
-    assert ".agent/context/approach.md" in prompt
+    assert ".agent/<Type>/<BranchSlug>/planning.md" in prompt
+    assert ".agent/<Type>/<BranchSlug>/files.md" in prompt
+    assert ".agent/<Type>/<BranchSlug>/approach.md" in prompt
 
 
 def test_build_sdd_prompt_restrictions_present():

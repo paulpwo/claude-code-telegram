@@ -530,10 +530,17 @@ class TestServerIssueWebhookIntegration:
         settings = _make_settings(enable_issue_webhook=True, notification_chat_ids=[])
         db_manager = MagicMock()
 
-        with patch(
-            "src.api.server._try_record_webhook",
-            new_callable=AsyncMock,
-            return_value=True,
+        with (
+            patch(
+                "src.api.server._try_record_webhook",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
+                "src.api.server.try_record_issue_seen",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
         ):
             app = create_api_app(
                 bus,
