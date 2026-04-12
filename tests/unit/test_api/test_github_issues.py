@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 from fastapi.testclient import TestClient
 
 from src.api.github_issues import (
@@ -27,7 +26,6 @@ from src.api.github_issues import (
 )
 from src.api.server import create_api_app
 from src.events.bus import EventBus
-from src.events.types import AgentResponseEvent, ScheduledEvent
 
 # ---------------------------------------------------------------------------
 # Helpers

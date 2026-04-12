@@ -182,7 +182,7 @@ async def _topics_add(
             # Try to inject a stored PAT into HTTPS URLs for authenticated cloning
             clone_url = git_url
             try:
-                from cryptography.fernet import Fernet, InvalidToken
+                from cryptography.fernet import Fernet
 
                 from ...storage.repositories import GitTokenRepository
 

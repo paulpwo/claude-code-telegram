@@ -5,7 +5,7 @@ Verifies that:
 - In classic mode, dangerous patterns ARE blocked (existing behavior).
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

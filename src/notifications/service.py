@@ -5,7 +5,7 @@ through the Telegram bot API with rate limiting (1 msg/sec per chat).
 """
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 import structlog
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup

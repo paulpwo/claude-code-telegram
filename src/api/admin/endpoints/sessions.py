@@ -30,7 +30,6 @@ async def list_sessions(
     Optional ``user_id`` query param filters to a single user's sessions.
     """
     db = get_db(request)
-    repo = SessionRepository(db)
 
     async with db.get_connection() as conn:
         if user_id is not None:

@@ -7,7 +7,6 @@ classic mode, delegates to existing full-featured handlers.
 
 import asyncio
 import re
-import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -147,7 +146,6 @@ class MessageOrchestrator:
             context.user_data.pop("_thread_context", None)
 
             is_sync_bypass = handler.__name__ in {"sync_threads", "topics_command"}
-            is_start_bypass = handler.__name__ in {"start_command", "agentic_start"}
             message_thread_id = self._extract_message_thread_id(update)
             should_enforce = self.settings.enable_project_threads
 
@@ -760,7 +758,7 @@ class MessageOrchestrator:
         nav.append(
             InlineKeyboardButton(
                 f"{page + 1}/{total_pages}",
-                callback_data=f"voice_noop",
+                callback_data="voice_noop",
             )
         )
         if page < total_pages - 1:

@@ -4,7 +4,7 @@ GET   /users            — paginated list of all users
 PATCH /users/{user_id}  — toggle is_allowed for a user
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -33,7 +33,6 @@ async def list_users(
 ) -> Dict[str, Any]:
     """Return a paginated list of all registered users."""
     db = get_db(request)
-    repo = UserRepository(db)
 
     # Get total count
     async with db.get_connection() as conn:

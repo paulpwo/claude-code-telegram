@@ -100,6 +100,23 @@ git merge upstream/main
 
 ---
 
+## Python — SIEMPRE usar `.venv`
+
+**NUNCA** usar `python3`, `pip3` ni ningún Python del sistema.
+Usar **siempre** el intérprete del virtualenv local:
+
+```bash
+.venv/bin/python   # en vez de python3
+.venv/bin/pip      # en vez de pip3
+.venv/bin/black    # formatters, linters, herramientas — todo desde .venv
+.venv/bin/isort
+.venv/bin/pytest
+```
+
+Si `.venv` no existe: `python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"`
+
+---
+
 ## Project Overview
 
 Telegram bot providing remote access to Claude Code. Python 3.10+, built with Poetry, using `python-telegram-bot` for Telegram and `claude-agent-sdk` for Claude Code integration.

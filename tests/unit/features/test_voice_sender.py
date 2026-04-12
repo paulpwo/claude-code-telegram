@@ -2,12 +2,10 @@
 
 import asyncio
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.bot.features.registry import _pyttsx3_importable
 from src.bot.features.voice_handler import VoiceSender
 
 # ---------------------------------------------------------------------------
@@ -136,7 +134,6 @@ async def test_synthesize_ogg_timeout_kills_process(voice_sender, tmp_path):
 @pytest.mark.asyncio
 async def test_send_voice_reply_success_cleans_tmp(voice_sender, tmp_path):
     """send_voice_reply returns True and cleans up temp dir after successful send."""
-    good_proc = _make_process(returncode=0)
     reply_voice = AsyncMock()
     update = _make_update(reply_voice_mock=reply_voice)
 
@@ -369,8 +366,6 @@ async def test_synthesize_ogg_system_success(system_voice_sender, tmp_path):
 @pytest.mark.asyncio
 async def test_synthesize_ogg_system_pyttsx3_missing(system_voice_sender, tmp_path):
     """_synthesize_ogg_system raises RuntimeError with install hint when pyttsx3 absent."""
-    import sys
-
     # Remove pyttsx3 from sys.modules and make import fail
     with patch.dict("sys.modules", {"pyttsx3": None}):  # type: ignore[dict-item]
         with pytest.raises(RuntimeError, match="pyttsx3"):

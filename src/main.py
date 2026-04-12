@@ -35,7 +35,6 @@ from src.security.audit import AuditLogger, InMemoryAuditStorage
 from src.security.auth import (
     AuthenticationManager,
     DatabaseTokenStorage,
-    InMemoryTokenStorage,
     TokenAuthProvider,
     WhitelistAuthProvider,
 )
@@ -315,7 +314,7 @@ async def run_application(app: Dict[str, Any]) -> None:
         # the scheduler into app.state after it starts.
         api_app_instance = None
         if features.api_server_enabled:
-            from src.api.server import create_api_app, run_api_server
+            from src.api.server import create_api_app
 
             # Build the FastAPI app first so we have a reference to app.state
             api_app_instance = create_api_app(event_bus, config, storage.db_manager)
