@@ -14,6 +14,7 @@ Usage:
 import shutil
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import urlparse, urlunparse
 
 import structlog
 from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -25,6 +26,20 @@ from ...projects import load_project_registry_from_db
 from ...storage.repositories import ProjectRepository
 
 logger = structlog.get_logger()
+
+
+def _inject_pat_into_url(git_url: str, pat: str) -> str:
+    """Inject a PAT into an HTTPS git URL for authenticated cloning.
+
+    For SSH or other URL schemes the URL is returned unchanged.
+    """
+    parsed = urlparse(git_url)
+    if parsed.scheme in ("https", "http"):
+        port_part = f":{parsed.port}" if parsed.port else ""
+        authed = parsed._replace(netloc=f"{pat}@{parsed.hostname}{port_part}")
+        return urlunparse(authed)
+    return git_url
+
 
 _USAGE = (
     "Usage: /topics &lt;add|list|delete&gt; [args]\n"
@@ -153,27 +168,62 @@ async def _topics_add(
     if git_url is None:
         abs_path.mkdir(parents=True, exist_ok=True)
     else:
-        # Clone the repository into abs_path
-        from ..features.registry import FeatureRegistry
+        if abs_path.is_dir():
+            # Directory already exists — skip clone, proceed to DB upsert
+            logger.info(
+                "topics_add: directory already exists, skipping clone",
+                path=str(abs_path),
+                slug=slug,
+            )
+        else:
+            # Clone the repository into abs_path
+            # Try to inject a stored PAT into HTTPS URLs for authenticated cloning
+            clone_url = git_url
+            try:
+                from cryptography.fernet import Fernet, InvalidToken
 
-        features: FeatureRegistry = context.bot_data["features"]
-        git: Optional[GitIntegration] = features.get_git_integration()
-        if git is None:
-            await update.effective_message.reply_text(
-                "❌ <b>Git integration is not available.</b>\n"
-                "Enable it with <code>ENABLE_GIT_INTEGRATION=true</code>.",
-                parse_mode="HTML",
-            )
-            return
-        try:
-            await git.clone_repo(git_url, abs_path)
-        except GitError as exc:
-            await update.effective_message.reply_text(
-                f"❌ <b>Git clone failed.</b>\n<pre>{exc}</pre>\n"
-                "No project was registered.",
-                parse_mode="HTML",
-            )
-            return
+                from ...storage.repositories import GitTokenRepository
+
+                storage = context.bot_data.get("storage")
+                db_manager = storage.db_manager if storage else None
+                encryption_key = settings.git_token_encryption_key
+
+                if db_manager and encryption_key:
+                    user_id = update.effective_user.id
+                    git_token_repo = GitTokenRepository(db_manager)
+                    encrypted = await git_token_repo.get(user_id)
+                    if encrypted:
+                        fernet = Fernet(encryption_key.get_secret_value().encode())
+                        pat = fernet.decrypt(encrypted).decode()
+                        clone_url = _inject_pat_into_url(git_url, pat)
+            except Exception as pat_exc:
+                logger.warning(
+                    "topics_add: could not read PAT, cloning without auth",
+                    error=str(pat_exc),
+                    slug=slug,
+                )
+                clone_url = git_url
+
+            from ..features.registry import FeatureRegistry
+
+            features: FeatureRegistry = context.bot_data["features"]
+            git: Optional[GitIntegration] = features.get_git_integration()
+            if git is None:
+                await update.effective_message.reply_text(
+                    "❌ <b>Git integration is not available.</b>\n"
+                    "Enable it with <code>ENABLE_GIT_INTEGRATION=true</code>.",
+                    parse_mode="HTML",
+                )
+                return
+            try:
+                await git.clone_repo(clone_url, abs_path)
+            except GitError as exc:
+                await update.effective_message.reply_text(
+                    f"❌ <b>Git clone failed.</b>\n<pre>{exc}</pre>\n"
+                    "No project was registered.",
+                    parse_mode="HTML",
+                )
+                return
 
     # Persist project record
     project_repo: ProjectRepository = context.bot_data["storage"].projects

@@ -31,7 +31,7 @@ _BRANCH_RE = re.compile(
     re.IGNORECASE,
 )
 _GITHUB_REPO_RE = re.compile(
-    r"https?://github\.com/([^/]+)/([^/]+?)(?:\.git|/|$)",
+    r"(?:https?://github\.com/|git@github\.com:)([^/]+)/([^/\s]+?)(?:\.git|/|$)",
     re.IGNORECASE,
 )
 
@@ -274,6 +274,7 @@ async def sdd_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             issue_number=_extract_issue_number(arg) if is_url else None,
             arg=arg,
             settings=settings,
+            working_dir=current_dir,
         )
 
     except Exception as exc:
@@ -296,6 +297,20 @@ async def sdd_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 # ---------------------------------------------------------------------------
 
 
+async def _git_output(cmd: list[str], cwd: str) -> str:
+    """Run a git command in *cwd* and return its stripped stdout."""
+    import asyncio
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        cwd=cwd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout, _ = await proc.communicate()
+    return stdout.decode().strip()
+
+
 async def _try_auto_pr(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -305,6 +320,7 @@ async def _try_auto_pr(
     issue_number: Optional[int],
     arg: str,
     settings: Settings,
+    working_dir: str = "",
 ) -> None:
     """Try to create a GitHub PR after SDD branch push.
 
@@ -347,8 +363,37 @@ async def _try_auto_pr(
         logger.error("SDD auto-PR: could not decrypt PAT", error=str(e), user_id=user_id)
         return
 
-    # Parse branch and repo from Claude's response
-    branch_name, owner, repo = _parse_sdd_summary(response_text, issue_url)
+    # Parse branch and repo — prefer git subprocess over response regex
+    branch_name: Optional[str] = None
+    owner: Optional[str] = None
+    repo: Optional[str] = None
+
+    if working_dir:
+        try:
+            branch_name = await _git_output(
+                ["git", "branch", "--show-current"], working_dir
+            )
+            remote_url = await _git_output(
+                ["git", "remote", "get-url", "origin"], working_dir
+            )
+            if remote_url:
+                repo_match = _GITHUB_REPO_RE.search(remote_url)
+                if repo_match:
+                    owner = repo_match.group(1)
+                    repo = repo_match.group(2).rstrip("/")
+        except Exception as git_exc:
+            logger.warning(
+                "SDD auto-PR: git subprocess failed, falling back to regex",
+                error=str(git_exc),
+                user_id=user_id,
+            )
+
+    # Fall back to parsing Claude's response text if git commands yielded nothing
+    if not branch_name or not owner or not repo:
+        fb_branch, fb_owner, fb_repo = _parse_sdd_summary(response_text, issue_url)
+        branch_name = branch_name or fb_branch
+        owner = owner or fb_owner
+        repo = repo or fb_repo
 
     if not branch_name or not owner or not repo:
         logger.info(
