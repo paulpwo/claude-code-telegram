@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import { usersApi } from "@/lib/api";
+import { usersApi, User } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -89,7 +89,7 @@ export function Users() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data?.items.map((user) => (
+            {(data?.items ?? []).map((user: User) => (
               <TableRow key={user.user_id}>
                 <TableCell className="font-mono text-sm">{user.user_id}</TableCell>
                 <TableCell>{user.username ? `@${user.username}` : "—"}</TableCell>

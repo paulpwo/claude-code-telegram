@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import { cronsApi } from "@/lib/api";
+import { cronsApi, CronJob } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -71,7 +71,7 @@ export function Crons() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data?.map((job) => (
+            {(data ?? []).map((job: CronJob) => (
               <TableRow key={job.id}>
                 <TableCell className="font-mono text-xs">{job.id}</TableCell>
                 <TableCell className="font-medium">{job.name}</TableCell>

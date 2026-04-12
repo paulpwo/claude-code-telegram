@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { eventsApi } from "@/lib/api";
+import { eventsApi, WebhookEvent, AuditEvent } from "@/lib/api";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,7 +38,7 @@ function WebhooksTab() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data?.items.map((event) => (
+            {(data?.items ?? []).map((event: WebhookEvent) => (
               <TableRow key={event.id}>
                 <TableCell className="font-mono text-xs">{event.id}</TableCell>
                 <TableCell>
@@ -115,7 +115,7 @@ function AuditLogTab() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data?.items.map((event) => (
+            {(data?.items ?? []).map((event: AuditEvent) => (
               <TableRow key={event.id}>
                 <TableCell className="font-mono text-xs">{event.id}</TableCell>
                 <TableCell>{event.username ?? event.user_id}</TableCell>

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { sessionsApi } from "@/lib/api";
+import { sessionsApi, Session } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -61,7 +61,7 @@ export function Sessions() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data?.items.map((session) => (
+            {(data?.items ?? []).map((session: Session) => (
               <TableRow
                 key={session.session_id}
                 className="cursor-pointer"
