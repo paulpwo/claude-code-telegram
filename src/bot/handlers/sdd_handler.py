@@ -167,26 +167,41 @@ async def sdd_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     parts = text.split(maxsplit=1)
     if len(parts) < 2 or not parts[1].strip():
         await update.message.reply_text(
-            "Usage: <code>/sdd &lt;github-issue-url | description&gt;</code>\n\n"
+            "Usage: <code>/sdd &lt;proyecto&gt; &lt;descripción | github-url&gt;</code>\n\n"
             "Examples:\n"
-            "  <code>/sdd https://github.com/owner/repo/issues/5</code>\n"
-            "  <code>/sdd Add dark mode to settings page</code>",
+            "  <code>/sdd portfolio agregar modo claro</code>\n"
+            "  <code>/sdd portfolio https://github.com/owner/repo/issues/5</code>",
             parse_mode="HTML",
         )
         if audit_logger:
             await audit_logger.log_command(user_id, "sdd", [], False)
         return
 
-    arg = parts[1].strip()
+    raw_arg = parts[1].strip()
+
+    # --- Resolve project slug and working directory ---
+    # If the first token matches a directory under approved_directory, treat it
+    # as a project slug. Otherwise fall back to the user's current directory.
+    approved_base = Path(settings.approved_directory)
+    tokens = raw_arg.split(maxsplit=1)
+    first_token = tokens[0]
+    candidate_dir = approved_base / first_token
+
+    if len(tokens) >= 2 and candidate_dir.is_dir():
+        # /sdd <slug> <description|url>
+        current_dir = str(candidate_dir)
+        arg = tokens[1].strip()
+    else:
+        # Legacy: /sdd <description|url>  — use user's current directory
+        current_dir = context.user_data.get(
+            "current_directory", settings.approved_directory
+        )
+        arg = raw_arg
+
     is_url = _is_github_issue_url(arg)
 
     # --- Progress message ---
-    progress_msg = await update.message.reply_text("🔍 Analyzing...")
-
-    # --- Resolve working directory ---
-    current_dir = context.user_data.get(
-        "current_directory", settings.approved_directory
-    )
+    progress_msg = await update.message.reply_text("🔍 Analizando...")
 
     # --- Build prompt ---
     prompt = _build_sdd_prompt(
