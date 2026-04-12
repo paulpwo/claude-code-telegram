@@ -31,7 +31,7 @@ _BRANCH_RE = re.compile(
     re.IGNORECASE,
 )
 _GITHUB_REPO_RE = re.compile(
-    r"(?:https?://github\.com/|git@github\.com:)([^/]+)/([^/\s]+?)(?:\.git|/|$)",
+    r"(?:https?://(?:[^@/]+@)?github\.com/|git@github\.com:)([^/]+)/([^/\s]+?)(?:\.git|/|$)",
     re.IGNORECASE,
 )
 
