@@ -331,6 +331,44 @@ class DatabaseManager:
                     ON projects(chat_id, enabled);
                 """,
             ),
+            (
+                6,
+                """
+                -- Git PATs (Fernet-encrypted, one per Telegram user)
+                CREATE TABLE IF NOT EXISTS git_tokens (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL UNIQUE,
+                    encrypted_pat BLOB NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                );
+
+                -- Per-issue deduplication (repo+number composite unique)
+                CREATE TABLE IF NOT EXISTS webhook_issue_seen (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    repo_full_name TEXT NOT NULL,
+                    issue_number INTEGER NOT NULL,
+                    first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(repo_full_name, issue_number)
+                );
+
+                -- Pending confirmation state (TTL-based, 24 h)
+                CREATE TABLE IF NOT EXISTS webhook_confirmations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    repo_full_name TEXT NOT NULL,
+                    issue_number INTEGER NOT NULL,
+                    issue_title TEXT,
+                    payload_json TEXT NOT NULL,
+                    chat_ids TEXT NOT NULL,
+                    working_directory TEXT NOT NULL,
+                    expires_at TIMESTAMP NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_webhook_confirmations_expires
+                    ON webhook_confirmations(expires_at);
+                """,
+            ),
         ]
 
     async def _init_pool(self):

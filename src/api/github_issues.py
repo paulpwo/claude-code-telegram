@@ -20,9 +20,12 @@ Design decisions
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import structlog
+
+if TYPE_CHECKING:
+    from ..storage.database import DatabaseManager
 
 logger = structlog.get_logger()
 
@@ -254,3 +257,33 @@ def build_trigger_notification(payload: Dict[str, Any]) -> str:
         f"Claude is analyzing the issue and will create a branch with the "
         f"pre-analysis documents. This may take a minute…"
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-issue deduplication helper
+# ---------------------------------------------------------------------------
+
+
+async def try_record_issue_seen(
+    db_manager: "DatabaseManager",
+    repo_full_name: str,
+    issue_number: int,
+) -> bool:
+    """Atomically insert a (repo, issue_number) row.
+
+    Returns True if this is the first time we see this issue (inserted),
+    False if it was already seen (duplicate — silent drop).
+    """
+    async with db_manager.get_connection() as conn:
+        await conn.execute(
+            """
+            INSERT OR IGNORE INTO webhook_issue_seen (repo_full_name, issue_number)
+            VALUES (?, ?)
+            """,
+            (repo_full_name, issue_number),
+        )
+        cursor = await conn.execute("SELECT changes()")
+        row = await cursor.fetchone()
+        inserted = (row[0] > 0) if row else False
+        await conn.commit()
+    return inserted

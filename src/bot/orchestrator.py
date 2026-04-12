@@ -336,6 +336,7 @@ class MessageOrchestrator:
             ("model", command.model_command),
             ("restart", command.restart_command),
             ("sdd", sdd_handler.sdd_command),
+            ("git", command.git_command),
         ]
         if self.settings.enable_voice_replies:
             handlers.append(("voice", self.agentic_voice_command))
@@ -512,6 +513,7 @@ class MessageOrchestrator:
                 BotCommand("model", "Switch Claude model and effort"),
                 BotCommand("restart", "Restart the bot"),
                 BotCommand("sdd", "Analyze issue & create .agent/ branch"),
+                BotCommand("git", "Gestionar token GitHub (set/status/logout)"),
             ]
             if self.settings.enable_voice_replies:
                 commands.append(
@@ -541,7 +543,7 @@ class MessageOrchestrator:
                 BotCommand("status", "Show session status"),
                 BotCommand("export", "Export current session"),
                 BotCommand("actions", "Show quick actions"),
-                BotCommand("git", "Git repository commands"),
+                BotCommand("git", "Repositorio git + token GitHub (set/status/logout)"),
                 BotCommand("model", "Switch Claude model and effort"),
                 BotCommand("restart", "Restart the bot"),
             ]

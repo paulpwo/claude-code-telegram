@@ -12,7 +12,7 @@ the response.
 
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 import structlog
 from telegram import Update
@@ -22,6 +22,39 @@ from ...config.settings import Settings
 from ...security.audit import AuditLogger
 
 logger = structlog.get_logger()
+
+
+# Regex patterns for parsing Claude's SDD response summary
+_BRANCH_RE = re.compile(
+    r"(?:branch[:\s]+|checkout[:\s]+-b\s+|created branch[:\s]+)"
+    r"([A-Za-z][A-Za-z0-9/_-]+)",
+    re.IGNORECASE,
+)
+_GITHUB_REPO_RE = re.compile(
+    r"https?://github\.com/([^/]+)/([^/]+?)(?:\.git|/|$)",
+    re.IGNORECASE,
+)
+
+
+def _parse_sdd_summary(
+    response_text: str,
+    issue_url: str,
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Extract (branch_name, owner, repo) from Claude's SDD summary response.
+
+    Returns (None, None, None) if not found.
+    """
+    branch_match = _BRANCH_RE.search(response_text)
+    branch_name = branch_match.group(1) if branch_match else None
+
+    repo_match = _GITHUB_REPO_RE.search(issue_url) or _GITHUB_REPO_RE.search(response_text)
+    if repo_match:
+        owner = repo_match.group(1)
+        repo = repo_match.group(2).rstrip("/")
+    else:
+        owner = repo = None
+
+    return branch_name, owner, repo
 
 # Regex for detecting GitHub issue URLs
 _GITHUB_ISSUE_RE = re.compile(
@@ -216,6 +249,18 @@ async def sdd_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         logger.info("SDD command completed successfully", user_id=user_id)
 
+        # --- Auto-PR: attempt to open a PR if the user has a GitHub PAT stored ---
+        await _try_auto_pr(
+            update=update,
+            context=context,
+            user_id=user_id,
+            response_text=response_text,
+            issue_url=arg if is_url else "",
+            issue_number=_extract_issue_number(arg) if is_url else None,
+            arg=arg,
+            settings=settings,
+        )
+
     except Exception as exc:
         error_msg = str(exc)
         logger.error(
@@ -229,3 +274,107 @@ async def sdd_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         if audit_logger:
             await audit_logger.log_command(user_id, "sdd", [arg], False)
+
+
+# ---------------------------------------------------------------------------
+# Auto-PR helper (T-17)
+# ---------------------------------------------------------------------------
+
+
+async def _try_auto_pr(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    response_text: str,
+    issue_url: str,
+    issue_number: Optional[int],
+    arg: str,
+    settings: Settings,
+) -> None:
+    """Try to create a GitHub PR after SDD branch push.
+
+    Silently skips if no PAT is configured or if branch/repo info cannot be
+    parsed from Claude's response. Sends a tip message prompting the user to
+    configure a PAT when one is not set.
+    """
+    from cryptography.fernet import Fernet, InvalidToken
+
+    from ...bot.features.git_integration import GitIntegration
+    from ...storage.repositories import GitTokenRepository
+
+    storage = context.bot_data.get("storage")
+    db_manager = storage.db_manager if storage else None
+    encryption_key = settings.git_token_encryption_key
+
+    if not db_manager:
+        return
+
+    git_token_repo = GitTokenRepository(db_manager)
+    encrypted = await git_token_repo.get(user_id)
+
+    if not encrypted:
+        # Nudge user to set a PAT for future auto-PR
+        await update.effective_message.reply_text(
+            "💡 Configurá un token de GitHub con <code>/git set &lt;token&gt;</code> "
+            "para habilitar la creación automática de PRs.",
+            parse_mode="HTML",
+        )
+        return
+
+    if not encryption_key:
+        logger.warning("SDD auto-PR: GIT_TOKEN_ENCRYPTION_KEY not set", user_id=user_id)
+        return
+
+    try:
+        fernet = Fernet(encryption_key.get_secret_value().encode())
+        pat = fernet.decrypt(encrypted).decode()
+    except (InvalidToken, Exception) as e:
+        logger.error("SDD auto-PR: could not decrypt PAT", error=str(e), user_id=user_id)
+        return
+
+    # Parse branch and repo from Claude's response
+    branch_name, owner, repo = _parse_sdd_summary(response_text, issue_url)
+
+    if not branch_name or not owner or not repo:
+        logger.info(
+            "SDD auto-PR: could not extract branch/repo from response, skipping PR",
+            user_id=user_id,
+        )
+        return
+
+    # Determine default branch (fall back to "main")
+    base_branch = "main"
+    for protected in settings.sdd_protected_branches:
+        if protected in ("main", "master", "develop"):
+            base_branch = protected
+            break
+
+    issue_title = arg if not _is_github_issue_url(arg) else f"Issue #{issue_number}"
+
+    try:
+        git_integration = GitIntegration(settings)
+        pr_url = await git_integration.create_pr(
+            owner=owner,
+            repo=repo,
+            head_branch=branch_name,
+            base_branch=base_branch,
+            issue_number=issue_number or 0,
+            issue_title=issue_title,
+            pat=pat,
+        )
+        await update.effective_message.reply_text(
+            f"✅ <b>PR creado:</b> {pr_url}",
+            parse_mode="HTML",
+        )
+        logger.info(
+            "SDD auto-PR created",
+            pr_url=pr_url,
+            branch=branch_name,
+            user_id=user_id,
+        )
+    except Exception as e:
+        await update.effective_message.reply_text(
+            f"⚠️ Rama pusheada pero la creación del PR falló: <code>{str(e)[:200]}</code>",
+            parse_mode="HTML",
+        )
+        logger.error("SDD auto-PR failed", error=str(e), user_id=user_id)

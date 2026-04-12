@@ -72,6 +72,8 @@ async def handle_callback_query(
             "effort": lambda q, p, ctx: _handle_model_selection(q, f"effort:{p}", ctx),
             "topics_del_confirm": topics_delete_confirm_callback,
             "topics_del_cancel": topics_delete_cancel_callback,
+            "issue-analyze": handle_issue_analyze_callback,
+            "issue-ignore": handle_issue_ignore_callback,
         }
 
         handler = handlers.get(action)
@@ -1320,3 +1322,135 @@ def _escape_markdown(text: str) -> str:
     Legacy name kept for compatibility with callers; actually escapes HTML.
     """
     return escape_html(text)
+
+
+# ---------------------------------------------------------------------------
+# Webhook issue confirmation callbacks (T-10, T-11)
+# ---------------------------------------------------------------------------
+
+
+async def handle_issue_analyze_callback(
+    query, param: str, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """User tapped 'SDD analyze' — validate TTL, trigger SDD, delete confirmation row."""
+    import json
+    from pathlib import Path as _Path
+
+    from ...events.bus import EventBus
+    from ...events.types import ScheduledEvent
+    from ...storage.database import DatabaseManager
+    from ...storage.repositories import WebhookConfirmationRepository
+    from ..handlers.sdd_handler import _build_sdd_prompt
+
+    storage = context.bot_data.get("storage")
+    db_manager: DatabaseManager = storage.db_manager if storage else None
+    event_bus: EventBus = context.bot_data.get("event_bus")
+    settings = context.bot_data["settings"]
+
+    if not db_manager or not event_bus:
+        await query.edit_message_text(
+            "❌ <b>Service unavailable.</b>", parse_mode="HTML"
+        )
+        return
+
+    try:
+        row_id = int(param)
+    except (TypeError, ValueError):
+        await query.edit_message_text(
+            "❌ <b>Invalid confirmation ID.</b>", parse_mode="HTML"
+        )
+        return
+
+    confirmation_repo = WebhookConfirmationRepository(db_manager)
+    row = await confirmation_repo.get_if_valid(row_id)
+
+    if row is None:
+        await query.edit_message_text(
+            "⏰ <b>Confirmación expirada.</b>\n\n"
+            "Este pedido ya expiró. Re-abrí el issue para disparar un nuevo análisis.",
+            parse_mode="HTML",
+        )
+        return
+
+    # Extract stored context
+    repo = row["repo_full_name"]
+    issue_number = row["issue_number"]
+    issue_title = row["issue_title"] or ""
+    working_directory = _Path(row["working_directory"])
+    chat_ids = [int(c) for c in row["chat_ids"].split(",") if c.strip()]
+    payload = json.loads(row["payload_json"])
+    issue_url = (payload.get("issue") or {}).get("html_url", "")
+
+    # Delete the confirmation row before publishing
+    await confirmation_repo.delete(row_id)
+
+    # Build SDD prompt and publish ScheduledEvent
+    prompt = _build_sdd_prompt(
+        arg=issue_url or f"Issue #{issue_number}: {issue_title}",
+        working_dir=working_directory,
+        protected_branches=getattr(settings, "sdd_protected_branches", []),
+        is_url=bool(issue_url),
+    )
+
+    await event_bus.publish(
+        ScheduledEvent(
+            job_id=f"issue-webhook-{repo}-{issue_number}",
+            job_name="github_issue_sdd",
+            prompt=prompt,
+            working_directory=working_directory,
+            target_chat_ids=chat_ids,
+        )
+    )
+
+    await query.edit_message_text(
+        f"🔍 <b>Análisis SDD iniciado para issue #{issue_number}</b>\n\n"
+        f"Repo: <code>{escape_html(repo)}</code>\n"
+        f"Título: {escape_html(issue_title)}",
+        parse_mode="HTML",
+    )
+
+    logger.info(
+        "Issue SDD analysis triggered via callback",
+        repo=repo,
+        issue_number=issue_number,
+        row_id=row_id,
+    )
+
+
+async def handle_issue_ignore_callback(
+    query, param: str, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """User tapped 'Ignore' — delete the confirmation row, update message."""
+    from ...storage.database import DatabaseManager
+    from ...storage.repositories import WebhookConfirmationRepository
+
+    storage = context.bot_data.get("storage")
+    db_manager: DatabaseManager = storage.db_manager if storage else None
+
+    try:
+        row_id = int(param)
+    except (TypeError, ValueError):
+        await query.edit_message_text(
+            "❌ <b>Invalid confirmation ID.</b>", parse_mode="HTML"
+        )
+        return
+
+    if db_manager:
+        confirmation_repo = WebhookConfirmationRepository(db_manager)
+        row = await confirmation_repo.get_if_valid(row_id)
+        if row:
+            await confirmation_repo.delete(row_id)
+            await query.edit_message_text(
+                f"❌ <b>Issue ignorado.</b>\n\n"
+                f"Issue #{row['issue_number']} en <code>{escape_html(row['repo_full_name'])}</code> descartado.",
+                parse_mode="HTML",
+            )
+            return
+
+    # Row expired or not found — still update the message
+    await query.edit_message_text(
+        "❌ <b>Issue ignorado.</b>\n\n(La confirmación ya había expirado.)",
+        parse_mode="HTML",
+    )
+
+    logger.info("Issue ignored via callback", row_id=row_id)

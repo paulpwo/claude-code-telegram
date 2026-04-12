@@ -8,8 +8,9 @@ Features:
 
 import json
 from datetime import UTC, datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
+import aiosqlite
 import structlog
 
 from .database import DatabaseManager
@@ -740,7 +741,7 @@ class CostTrackingRepository:
             rows = await cursor.fetchall()
             return [CostTrackingModel.from_row(row) for row in rows]
 
-    async def get_total_costs(self, days: int = 30) -> List[Dict[str, any]]:
+    async def get_total_costs(self, days: int = 30) -> List[Dict[str, Any]]:
         """Get total costs by day."""
         async with self.db.get_connection() as conn:
             cursor = await conn.execute(
@@ -918,3 +919,104 @@ class AnalyticsRepository:
                 "tool_stats": tool_stats,
                 "daily_activity": daily_activity,
             }
+
+
+class GitTokenRepository:
+    """Encrypted PAT storage for /git set|status|logout."""
+
+    def __init__(self, db_manager: DatabaseManager) -> None:
+        """Initialize repository."""
+        self.db = db_manager
+
+    async def upsert(self, user_id: int, encrypted_pat: bytes) -> None:
+        """Insert or replace encrypted PAT for user."""
+        async with self.db.get_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO git_tokens (user_id, encrypted_pat, created_at, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    encrypted_pat = excluded.encrypted_pat,
+                    updated_at    = CURRENT_TIMESTAMP
+                """,
+                (user_id, encrypted_pat),
+            )
+            await conn.commit()
+
+    async def get(self, user_id: int) -> Optional[bytes]:
+        """Return the encrypted PAT bytes for user, or None."""
+        async with self.db.get_connection() as conn:
+            cursor = await conn.execute(
+                "SELECT encrypted_pat FROM git_tokens WHERE user_id = ?",
+                (user_id,),
+            )
+            row = await cursor.fetchone()
+            return bytes(row[0]) if row else None
+
+    async def delete(self, user_id: int) -> None:
+        """Remove PAT row for user (logout)."""
+        async with self.db.get_connection() as conn:
+            await conn.execute(
+                "DELETE FROM git_tokens WHERE user_id = ?", (user_id,)
+            )
+            await conn.commit()
+
+
+class WebhookConfirmationRepository:
+    """Manage pending webhook confirmation rows with TTL."""
+
+    def __init__(self, db_manager: DatabaseManager) -> None:
+        """Initialize repository."""
+        self.db = db_manager
+
+    async def insert(
+        self,
+        repo_full_name: str,
+        issue_number: int,
+        issue_title: Optional[str],
+        payload_json: str,
+        chat_ids: str,
+        working_directory: str,
+        expires_at: datetime,
+    ) -> int:
+        """Insert a new confirmation row; returns its row id."""
+        async with self.db.get_connection() as conn:
+            cursor = await conn.execute(
+                """
+                INSERT INTO webhook_confirmations
+                    (repo_full_name, issue_number, issue_title,
+                     payload_json, chat_ids, working_directory, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    repo_full_name,
+                    issue_number,
+                    issue_title,
+                    payload_json,
+                    chat_ids,
+                    working_directory,
+                    expires_at,
+                ),
+            )
+            await conn.commit()
+            return cursor.lastrowid  # type: ignore[return-value]
+
+    async def get_if_valid(self, row_id: int) -> Optional[aiosqlite.Row]:
+        """Return the confirmation row only if not expired."""
+        async with self.db.get_connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT * FROM webhook_confirmations
+                WHERE id = ? AND expires_at > CURRENT_TIMESTAMP
+                """,
+                (row_id,),
+            )
+            return await cursor.fetchone()
+
+    async def delete(self, row_id: int) -> None:
+        """Delete a confirmation row (after confirm or ignore)."""
+        async with self.db.get_connection() as conn:
+            await conn.execute(
+                "DELETE FROM webhook_confirmations WHERE id = ?", (row_id,)
+            )
+            await conn.commit()

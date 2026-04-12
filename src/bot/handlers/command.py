@@ -1143,9 +1143,125 @@ async def quick_actions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def git_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /git command to show git repository information."""
+    """Handle /git command.
+
+    Without subcommand: show git repository status (classic behaviour).
+    With PAT subcommands: manage GitHub Personal Access Token.
+
+    Subcommands:
+      /git set <token>   — encrypt and store a GitHub PAT
+      /git status        — show whether a PAT is stored (masked)
+      /git logout        — remove stored PAT
+    """
     user_id = update.effective_user.id
     settings: Settings = context.bot_data["settings"]
+    audit_logger: AuditLogger = context.bot_data.get("audit_logger")
+    args = context.args or []
+    subcommand = args[0].lower() if args else ""
+
+    # ------------------------------------------------------------------
+    # PAT sub-commands: set / status / logout
+    # ------------------------------------------------------------------
+    if subcommand in ("set", "logout") or (subcommand == "status" and len(args) == 1):
+        from cryptography.fernet import Fernet, InvalidToken
+
+        from ...storage.repositories import GitTokenRepository
+
+        storage = context.bot_data.get("storage")
+        db_manager = storage.db_manager if storage else None
+
+        if not db_manager:
+            await update.message.reply_text("❌ Database not available.")
+            return
+
+        git_repo = GitTokenRepository(db_manager)
+        encryption_key = settings.git_token_encryption_key
+
+        if subcommand == "set":
+            if len(args) < 2:
+                await update.message.reply_text(
+                    "Usage: <code>/git set &lt;github_token&gt;</code>",
+                    parse_mode="HTML",
+                )
+                return
+            if not encryption_key:
+                await update.message.reply_text(
+                    "❌ <b>GIT_TOKEN_ENCRYPTION_KEY not configured.</b>\n\n"
+                    "Ask the bot admin to set this environment variable.",
+                    parse_mode="HTML",
+                )
+                return
+            raw_pat = args[1]
+            fernet = Fernet(encryption_key.get_secret_value().encode())
+            encrypted = fernet.encrypt(raw_pat.encode())
+            await git_repo.upsert(user_id, encrypted)
+
+            # Best-effort: delete the original message that contains the token
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
+
+            await update.effective_chat.send_message(
+                "✅ <b>GitHub token guardado correctamente.</b>",
+                parse_mode="HTML",
+            )
+            if audit_logger:
+                await audit_logger.log_command(user_id, "git set", [], True)
+            return
+
+        if subcommand == "status":
+            encrypted = await git_repo.get(user_id)
+            if not encrypted:
+                await update.message.reply_text(
+                    "No hay token de GitHub configurado.\n"
+                    "Usá <code>/git set &lt;token&gt;</code> para agregar uno.",
+                    parse_mode="HTML",
+                )
+                return
+            if not encryption_key:
+                await update.message.reply_text(
+                    "❌ Clave de cifrado no configurada — no se puede decodificar el token."
+                )
+                return
+            fernet = Fernet(encryption_key.get_secret_value().encode())
+            try:
+                raw = fernet.decrypt(encrypted).decode()
+            except InvalidToken:
+                await update.message.reply_text(
+                    "❌ El token almacenado está corrupto. Volvé a ejecutar <code>/git set</code>.",
+                    parse_mode="HTML",
+                )
+                return
+            masked = (raw[:4] + "****...****" + raw[-4:]) if len(raw) > 8 else "****"
+            await update.message.reply_text(
+                f"✅ Token de GitHub configurado: <code>{masked}</code>",
+                parse_mode="HTML",
+            )
+            return
+
+        if subcommand == "logout":
+            await git_repo.delete(user_id)
+            await update.message.reply_text("✅ Token de GitHub eliminado.")
+            if audit_logger:
+                await audit_logger.log_command(user_id, "git logout", [], True)
+            return
+
+    # ------------------------------------------------------------------
+    # No subcommand (or unrecognised): show repository status
+    # ------------------------------------------------------------------
+    if subcommand and subcommand not in ("set", "status", "logout"):
+        await update.message.reply_text(
+            "Subcomando desconocido.\n\n"
+            "<b>Uso del token de GitHub:</b>\n"
+            "  <code>/git set &lt;token&gt;</code> — guardar PAT de GitHub\n"
+            "  <code>/git status</code> — ver si hay token guardado\n"
+            "  <code>/git logout</code> — eliminar token guardado\n\n"
+            "Sin subcomando muestra el estado del repositorio git actual.",
+            parse_mode="HTML",
+        )
+        return
+
     features = context.bot_data.get("features")
 
     if not features or not features.is_enabled("git"):

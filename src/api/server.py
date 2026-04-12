@@ -5,7 +5,9 @@ Receives external webhooks and publishes them as events on the bus.
 """
 
 import hashlib
+import json as _json
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -14,13 +16,13 @@ from fastapi import FastAPI, Header, HTTPException, Request
 
 from ..config.settings import Settings
 from ..events.bus import EventBus
-from ..events.types import AgentResponseEvent, ScheduledEvent, WebhookEvent
+from ..events.types import AgentResponseEvent, WebhookEvent
 from ..storage.database import DatabaseManager
+from ..storage.repositories import WebhookConfirmationRepository
 from .auth import verify_github_signature, verify_shared_secret, verify_timestamp
 from .github_issues import (
     IssueWebhookFilter,
-    build_issue_sdd_prompt,
-    build_trigger_notification,
+    try_record_issue_seen,
 )
 
 logger = structlog.get_logger()
@@ -179,16 +181,16 @@ def create_api_app(
             event_id=event.id,
         )
 
-        # -- GitHub issues: auto-trigger SDD analysis --
-        if provider == "github":
-            await _maybe_trigger_issue_sdd(
+        # -- GitHub issues: send confirmation menu (replaces auto-trigger) --
+        if provider == "github" and db_manager:
+            await _dispatch_issue_confirmation(
                 event_bus=event_bus,
                 event_type=event_type_name,
                 payload=payload,
                 issue_filter=issue_filter,
                 working_directory=_working_directory,
-                protected_branches=getattr(settings, "sdd_protected_branches", []),
                 chat_ids=_chat_ids,
+                db_manager=db_manager,
                 originating_event_id=event.id,
             )
 
@@ -197,24 +199,20 @@ def create_api_app(
     return app
 
 
-async def _maybe_trigger_issue_sdd(
+async def _dispatch_issue_confirmation(
     event_bus: EventBus,
     event_type: str,
     payload: Dict[str, Any],
     issue_filter: IssueWebhookFilter,
     working_directory: Path,
-    protected_branches: List[str],
     chat_ids: List[int],
+    db_manager: DatabaseManager,
     originating_event_id: str,
 ) -> None:
-    """Apply filtering and, if the issue qualifies, publish a ScheduledEvent.
+    """After delivery dedup, check issue-level dedup and send confirmation menu.
 
-    The ScheduledEvent carries a fully-formed SDD prompt.  The existing
-    AgentHandler picks it up and runs Claude, then publishes an
-    AgentResponseEvent that NotificationService delivers to the chat IDs.
-
-    A lightweight notification is also sent *before* Claude starts so the
-    user knows the analysis is in progress.
+    Replaces the old auto-trigger path: instead of running SDD immediately,
+    persists a confirmation row and sends an inline keyboard to each chat.
     """
     should_run, reason = issue_filter.should_trigger(event_type, payload)
     logger.info(
@@ -227,45 +225,79 @@ async def _maybe_trigger_issue_sdd(
     if not should_run:
         return
 
-    issue_number = (payload.get("issue") or {}).get("number", "?")
     repo = (payload.get("repository") or {}).get("full_name", "unknown/repo")
+    issue = payload.get("issue") or {}
+    issue_number = issue.get("number")
+    issue_title = issue.get("title", "(no title)")
+    issue_url = issue.get("html_url", "")
 
-    # 1. Send an immediate "analysis started" notification
-    if chat_ids:
-        notification_text = build_trigger_notification(payload)
-        for chat_id in chat_ids:
-            await event_bus.publish(
-                AgentResponseEvent(
-                    chat_id=chat_id,
-                    text=notification_text,
-                    parse_mode="HTML",
-                    originating_event_id=originating_event_id,
-                )
-            )
+    if not issue_number:
+        return
 
-    # 2. Build the SDD prompt and publish as a ScheduledEvent so AgentHandler
-    #    picks it up and runs Claude.
-    prompt = build_issue_sdd_prompt(
-        payload=payload,
-        working_directory=working_directory,
-        protected_branches=protected_branches,
-    )
-
-    await event_bus.publish(
-        ScheduledEvent(
-            job_id=f"issue-webhook-{repo}-{issue_number}",
-            job_name="github_issue_sdd",
-            prompt=prompt,
-            working_directory=working_directory,
-            target_chat_ids=chat_ids,
+    # Issue-level dedup
+    is_new_issue = await try_record_issue_seen(db_manager, repo, issue_number)
+    if not is_new_issue:
+        logger.info(
+            "Issue already seen, skipping confirmation",
+            repo=repo,
+            issue_number=issue_number,
         )
+        return
+
+    # Persist confirmation row (TTL 24 h)
+    confirmation_repo = WebhookConfirmationRepository(db_manager)
+    expires_at = datetime.now(UTC) + timedelta(hours=24)
+    row_id = await confirmation_repo.insert(
+        repo_full_name=repo,
+        issue_number=issue_number,
+        issue_title=issue_title,
+        payload_json=_json.dumps(payload),
+        chat_ids=",".join(str(c) for c in chat_ids),
+        working_directory=str(working_directory),
+        expires_at=expires_at,
     )
+
+    # Build confirmation message text
+    url_part = f'\n<a href="{issue_url}">View issue</a>' if issue_url else ""
+    text = (
+        f"New GitHub issue <b>#{issue_number}</b> in <code>{repo}</code>\n\n"
+        f"<b>{issue_title}</b>{url_part}\n\n"
+        f"Run SDD analysis?"
+    )
+
+    # Inline keyboard as serializable dict (server has no telegram dependency)
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "🔍 SDD analyze",
+                    "callback_data": f"issue-analyze:{row_id}",
+                },
+                {
+                    "text": "❌ Ignorar",
+                    "callback_data": f"issue-ignore:{row_id}",
+                },
+            ]
+        ]
+    }
+
+    # Send confirmation message with inline keyboard to each chat
+    for chat_id in chat_ids:
+        await event_bus.publish(
+            AgentResponseEvent(
+                chat_id=chat_id,
+                text=text,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+                originating_event_id=originating_event_id,
+            )
+        )
 
     logger.info(
-        "SDD analysis triggered from GitHub issue webhook",
+        "Issue confirmation menu sent",
         repo=repo,
         issue_number=issue_number,
-        chat_ids=chat_ids,
+        row_id=row_id,
     )
 
 
