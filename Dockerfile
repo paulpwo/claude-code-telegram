@@ -26,7 +26,7 @@ RUN npm ci
 # Copy source and build
 COPY src/admin/ ./
 
-RUN npm run build
+RUN npm run build:docker
 
 # =============================================================================
 # Stage 1: builder — Python deps via pip
