@@ -5,10 +5,10 @@ through the Telegram bot API with rate limiting (1 msg/sec per chat).
 """
 
 import asyncio
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import structlog
-from telegram import Bot
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
@@ -89,6 +89,36 @@ class NotificationService:
             return [event.chat_id]
         return list(self.default_chat_ids)
 
+    @staticmethod
+    def _build_reply_markup(
+        raw: Any,
+    ) -> Optional[InlineKeyboardMarkup]:
+        """Convert a serializable dict into an InlineKeyboardMarkup, or return as-is.
+
+        The server-side code passes ``reply_markup`` as a plain dict so that
+        the FastAPI layer has no dependency on the telegram library.  This
+        method reconstructs the proper Telegram object before sending.
+        """
+        if raw is None:
+            return None
+        if isinstance(raw, InlineKeyboardMarkup):
+            return raw
+        if isinstance(raw, dict):
+            rows = raw.get("inline_keyboard", [])
+            keyboard = [
+                [
+                    InlineKeyboardButton(
+                        text=btn.get("text", ""),
+                        callback_data=btn.get("callback_data"),
+                        url=btn.get("url"),
+                    )
+                    for btn in row
+                ]
+                for row in rows
+            ]
+            return InlineKeyboardMarkup(keyboard)
+        return None
+
     async def _rate_limited_send(self, chat_id: int, event: AgentResponseEvent) -> None:
         """Send message with per-chat rate limiting."""
         loop = asyncio.get_event_loop()
@@ -103,12 +133,16 @@ class NotificationService:
             # Split long messages (Telegram limit: 4096 chars)
             text = event.text
             chunks = self._split_message(text)
+            reply_markup = self._build_reply_markup(event.reply_markup)
 
-            for chunk in chunks:
+            for i, chunk in enumerate(chunks):
+                # Only attach reply_markup to the last chunk
+                chunk_markup = reply_markup if i == len(chunks) - 1 else None
                 await self.bot.send_message(
                     chat_id=chat_id,
                     text=chunk,
                     parse_mode=(ParseMode.HTML if event.parse_mode == "HTML" else None),
+                    reply_markup=chunk_markup,
                 )
                 self._last_send_per_chat[chat_id] = asyncio.get_event_loop().time()
 

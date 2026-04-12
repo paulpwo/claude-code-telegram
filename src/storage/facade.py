@@ -21,12 +21,14 @@ from .repositories import (
     AnalyticsRepository,
     AuditLogRepository,
     CostTrackingRepository,
+    GitTokenRepository,
     MessageRepository,
     ProjectRepository,
     ProjectThreadRepository,
     SessionRepository,
     ToolUsageRepository,
     UserRepository,
+    WebhookConfirmationRepository,
 )
 
 logger = structlog.get_logger()
@@ -47,6 +49,8 @@ class Storage:
         self.audit = AuditLogRepository(self.db_manager)
         self.costs = CostTrackingRepository(self.db_manager)
         self.analytics = AnalyticsRepository(self.db_manager)
+        self.git_tokens = GitTokenRepository(self.db_manager)
+        self.webhook_confirmations = WebhookConfirmationRepository(self.db_manager)
 
     async def initialize(self):
         """Initialize storage system."""

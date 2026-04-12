@@ -50,5 +50,6 @@ class AgentResponseEvent(Event):
     text: str = ""
     parse_mode: Optional[str] = "HTML"
     reply_to_message_id: Optional[int] = None
+    reply_markup: Optional[Any] = None  # InlineKeyboardMarkup or serializable dict
     source: str = "agent"
     originating_event_id: Optional[str] = None

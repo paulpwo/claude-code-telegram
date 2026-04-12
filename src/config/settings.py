@@ -86,6 +86,16 @@ class Settings(BaseSettings):
         description="Allow git branch -D (force-delete) (default: blocked)",
     )
 
+    # Git PAT encryption
+    git_token_encryption_key: Optional[SecretStr] = Field(
+        None,
+        description=(
+            "Fernet key (base64url, 32 bytes) used to encrypt GitHub PATs at rest. "
+            "Generate with: python -c \"from cryptography.fernet import Fernet; "
+            "print(Fernet.generate_key().decode())\""
+        ),
+    )
+
     # SDD command
     enable_sdd: bool = Field(True, description="Enable /sdd command")
     sdd_protected_branches: List[str] = Field(
