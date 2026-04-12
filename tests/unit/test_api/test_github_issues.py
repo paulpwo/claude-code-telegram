@@ -29,7 +29,6 @@ from src.api.server import create_api_app
 from src.events.bus import EventBus
 from src.events.types import AgentResponseEvent, ScheduledEvent
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -243,17 +242,13 @@ class TestIssueWebhookFilter:
         assert ok is True
 
     def test_allowlist_repo_in_list_triggers(self) -> None:
-        f = self._filter(
-            repo_allowlist=["owner/repo"], require_label=False
-        )
+        f = self._filter(repo_allowlist=["owner/repo"], require_label=False)
         payload = _make_issue_payload(action="opened", repo="owner/repo")
         ok, _ = f.should_trigger("issues", payload)
         assert ok is True
 
     def test_allowlist_repo_not_in_list_rejected(self) -> None:
-        f = self._filter(
-            repo_allowlist=["owner/repo"], require_label=False
-        )
+        f = self._filter(repo_allowlist=["owner/repo"], require_label=False)
         payload = _make_issue_payload(action="opened", repo="other/project")
         ok, reason = f.should_trigger("issues", payload)
         assert ok is False
@@ -314,9 +309,7 @@ class TestBuildTriggerNotification:
         assert "Fix the login page" in text
 
     def test_contains_html_link_when_url_present(self) -> None:
-        payload = _make_issue_payload(
-            issue_url="https://github.com/a/b/issues/5"
-        )
+        payload = _make_issue_payload(issue_url="https://github.com/a/b/issues/5")
         text = build_trigger_notification(payload)
         assert "https://github.com/a/b/issues/5" in text
 
@@ -383,6 +376,11 @@ class TestServerIssueWebhookIntegration:
         db_manager = MagicMock()
 
         with (
+            patch(
+                "src.api.server._try_record_webhook",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch(
                 "src.api.server.try_record_issue_seen",
                 new_callable=AsyncMock,
@@ -463,6 +461,11 @@ class TestServerIssueWebhookIntegration:
 
         with (
             patch(
+                "src.api.server._try_record_webhook",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
                 "src.api.server.try_record_issue_seen",
                 new_callable=AsyncMock,
                 return_value=True,
@@ -474,7 +477,10 @@ class TestServerIssueWebhookIntegration:
             mock_repo_cls.return_value = mock_repo
 
             app = create_api_app(
-                bus, settings, db_manager=db_manager, working_directory=Path("/tmp"),
+                bus,
+                settings,
+                db_manager=db_manager,
+                working_directory=Path("/tmp"),
                 notification_chat_ids=[456],
             )
             client = TestClient(app)
@@ -518,25 +524,30 @@ class TestServerIssueWebhookIntegration:
 
     def test_no_notification_when_no_chat_ids(self) -> None:
         """No AgentResponseEvent or ScheduledEvent when no chat IDs configured."""
+        from unittest.mock import patch
+
         bus, mock_pub = self._make_bus_with_mock_publish()
-        settings = _make_settings(
-            enable_issue_webhook=True, notification_chat_ids=[]
-        )
+        settings = _make_settings(enable_issue_webhook=True, notification_chat_ids=[])
         db_manager = MagicMock()
 
-        app = create_api_app(
-            bus,
-            settings,
-            db_manager=db_manager,
-            working_directory=Path("/tmp"),
-            notification_chat_ids=[],
-        )
-        client = TestClient(app)
+        with patch(
+            "src.api.server._try_record_webhook",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            app = create_api_app(
+                bus,
+                settings,
+                db_manager=db_manager,
+                working_directory=Path("/tmp"),
+                notification_chat_ids=[],
+            )
+            client = TestClient(app)
 
-        payload = _make_issue_payload(action="opened", labels=["sdd-analyze"])
-        resp = self._post_issue_webhook(
-            client, payload, delivery_id="delivery-no-chats"
-        )
+            payload = _make_issue_payload(action="opened", labels=["sdd-analyze"])
+            resp = self._post_issue_webhook(
+                client, payload, delivery_id="delivery-no-chats"
+            )
 
         assert resp.status_code == 200
         published = self._published_types(mock_pub)

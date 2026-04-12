@@ -7,9 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.bot.features.voice_handler import VoiceSender
 from src.bot.features.registry import _pyttsx3_importable
-
+from src.bot.features.voice_handler import VoiceSender
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -142,7 +141,9 @@ async def test_send_voice_reply_success_cleans_tmp(voice_sender, tmp_path):
     update = _make_update(reply_voice_mock=reply_voice)
 
     # Patch _synthesize_ogg to write a real (empty) file so open() works
-    async def fake_synthesize(text: str, td: Path, voice_override: str | None = None) -> Path:
+    async def fake_synthesize(
+        text: str, td: Path, voice_override: str | None = None
+    ) -> Path:
         p = td / "reply.ogg"
         p.write_bytes(b"fake-ogg-data")
         return p
@@ -180,7 +181,9 @@ async def test_send_voice_reply_failure_returns_false(voice_sender, tmp_path):
     """send_voice_reply returns False when synthesis raises, with no file leak."""
     update = _make_update()
 
-    async def fail_synthesize(text: str, td: Path, voice_override: str | None = None) -> Path:
+    async def fail_synthesize(
+        text: str, td: Path, voice_override: str | None = None
+    ) -> Path:
         raise RuntimeError("edge-tts not found")
 
     captured_tmp_dirs: list = []
@@ -246,11 +249,17 @@ async def test_synthesize_ogg_openai_success(openai_voice_sender, tmp_path):
 
     with (
         patch.object(
-            openai_voice_sender, "_get_openai_tts_client", return_value=mock_openai_client
+            openai_voice_sender,
+            "_get_openai_tts_client",
+            return_value=mock_openai_client,
         ),
-        patch("asyncio.create_subprocess_exec", AsyncMock(return_value=good_ffmpeg_proc)),
+        patch(
+            "asyncio.create_subprocess_exec", AsyncMock(return_value=good_ffmpeg_proc)
+        ),
     ):
-        result = await openai_voice_sender._synthesize_ogg_openai("Hello world", tmp_path)
+        result = await openai_voice_sender._synthesize_ogg_openai(
+            "Hello world", tmp_path
+        )
 
     assert isinstance(result, Path)
     assert result.name == "reply.ogg"
@@ -277,7 +286,9 @@ async def test_synthesize_ogg_openai_ffmpeg_missing(openai_voice_sender, tmp_pat
 
     with (
         patch.object(
-            openai_voice_sender, "_get_openai_tts_client", return_value=mock_openai_client
+            openai_voice_sender,
+            "_get_openai_tts_client",
+            return_value=mock_openai_client,
         ),
         patch(
             "asyncio.create_subprocess_exec",
@@ -334,9 +345,13 @@ async def test_synthesize_ogg_system_success(system_voice_sender, tmp_path):
     with (
         patch.dict("sys.modules", {"pyttsx3": mock_pyttsx3}),
         patch("asyncio.to_thread", side_effect=fake_to_thread),
-        patch("asyncio.create_subprocess_exec", AsyncMock(return_value=good_ffmpeg_proc)),
+        patch(
+            "asyncio.create_subprocess_exec", AsyncMock(return_value=good_ffmpeg_proc)
+        ),
     ):
-        result = await system_voice_sender._synthesize_ogg_system("Hello world", tmp_path)
+        result = await system_voice_sender._synthesize_ogg_system(
+            "Hello world", tmp_path
+        )
 
     assert isinstance(result, Path)
     assert result.name == "reply.ogg"

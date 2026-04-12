@@ -25,8 +25,7 @@ async def in_memory_db():
     """Create an in-memory SQLite DB with the user_tokens table."""
     conn = await aiosqlite.connect(":memory:")
     conn.row_factory = aiosqlite.Row
-    await conn.execute(
-        """
+    await conn.execute("""
         CREATE TABLE user_tokens (
             token_id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id  INTEGER NOT NULL,
@@ -36,8 +35,7 @@ async def in_memory_db():
             last_used  TIMESTAMP,
             is_active  BOOLEAN DEFAULT TRUE
         )
-        """
-    )
+        """)
     await conn.commit()
     yield _StubDBManager(conn)
     await conn.close()

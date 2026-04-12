@@ -91,8 +91,8 @@ class Settings(BaseSettings):
         None,
         description=(
             "Fernet key (base64url, 32 bytes) used to encrypt GitHub PATs at rest. "
-            "Generate with: python -c \"from cryptography.fernet import Fernet; "
-            "print(Fernet.generate_key().decode())\""
+            'Generate with: python -c "from cryptography.fernet import Fernet; '
+            'print(Fernet.generate_key().decode())"'
         ),
     )
 
@@ -479,7 +479,9 @@ class Settings(BaseSettings):
                 def decode_complex_value(
                     self, field_name: str, field: FieldInfo, value: Any
                 ) -> Any:
-                    if isinstance(value, str) and not value.strip().startswith(("[", "{")):
+                    if isinstance(value, str) and not value.strip().startswith(
+                        ("[", "{")
+                    ):
                         return value  # let field_validator handle comma-separated
                     return super().decode_complex_value(field_name, field, value)
 
@@ -496,7 +498,9 @@ class Settings(BaseSettings):
                 patched.append(s)
         return tuple(patched)
 
-    @field_validator("allowed_users", "notification_chat_ids", "admin_user_ids", mode="before")
+    @field_validator(
+        "allowed_users", "notification_chat_ids", "admin_user_ids", mode="before"
+    )
     @classmethod
     def parse_int_list(cls, v: Any) -> Optional[List[int]]:
         """Parse comma-separated integer lists."""

@@ -1356,7 +1356,9 @@ _EFFORT_BY_MODEL = {
 
 def _current_model_label(context: ContextTypes.DEFAULT_TYPE) -> str:
     """Return a human-friendly label for the active model + effort."""
-    override = context.user_data.get("model_override")  # "opus", "sonnet", "haiku", or None
+    override = context.user_data.get(
+        "model_override"
+    )  # "opus", "sonnet", "haiku", or None
     effort = context.user_data.get("effort_override")
     if not override:
         settings = context.bot_data.get("settings")
@@ -1446,7 +1448,9 @@ async def _handle_model_selection(
         row = []
         for level in effort_levels:
             row.append(
-                InlineKeyboardButton(level.capitalize(), callback_data=f"effort:{level}")
+                InlineKeyboardButton(
+                    level.capitalize(), callback_data=f"effort:{level}"
+                )
             )
             if len(row) == 2:
                 rows.append(row)

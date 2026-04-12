@@ -9,7 +9,6 @@ import pytest
 from src.bot.orchestrator import MessageOrchestrator
 from src.config.settings import Settings
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -222,7 +221,10 @@ def test_should_send_voice_auto_ignores_user_intent(voice_settings, deps):
     short_text = " ".join(["word"] * 50)
 
     # Even without voice keywords in user_message, auto triggers on word count
-    assert orchestrator._should_send_voice(context, short_text, user_message="hello") is True
+    assert (
+        orchestrator._should_send_voice(context, short_text, user_message="hello")
+        is True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -235,9 +237,12 @@ def test_should_send_voice_on_with_explicit_voice_request_es(voice_settings, dep
     orchestrator = MessageOrchestrator(settings=voice_settings, deps=deps)
     context = _make_context(user_data={"voice_reply": "on"})
 
-    assert orchestrator._should_send_voice(
-        context, "response text", user_message="respondeme en voz"
-    ) is True
+    assert (
+        orchestrator._should_send_voice(
+            context, "response text", user_message="respondeme en voz"
+        )
+        is True
+    )
 
 
 def test_should_send_voice_on_with_explicit_voice_request_en(voice_settings, deps):
@@ -245,9 +250,12 @@ def test_should_send_voice_on_with_explicit_voice_request_en(voice_settings, dep
     orchestrator = MessageOrchestrator(settings=voice_settings, deps=deps)
     context = _make_context(user_data={"voice_reply": "on"})
 
-    assert orchestrator._should_send_voice(
-        context, "response text", user_message="send audio please"
-    ) is True
+    assert (
+        orchestrator._should_send_voice(
+            context, "response text", user_message="send audio please"
+        )
+        is True
+    )
 
 
 def test_should_send_voice_on_without_voice_request(voice_settings, deps):
@@ -255,9 +263,12 @@ def test_should_send_voice_on_without_voice_request(voice_settings, deps):
     orchestrator = MessageOrchestrator(settings=voice_settings, deps=deps)
     context = _make_context(user_data={"voice_reply": "on"})
 
-    assert orchestrator._should_send_voice(
-        context, "response text", user_message="what is the weather today?"
-    ) is False
+    assert (
+        orchestrator._should_send_voice(
+            context, "response text", user_message="what is the weather today?"
+        )
+        is False
+    )
 
 
 def test_should_send_voice_on_no_user_message(voice_settings, deps):
@@ -265,7 +276,10 @@ def test_should_send_voice_on_no_user_message(voice_settings, deps):
     orchestrator = MessageOrchestrator(settings=voice_settings, deps=deps)
     context = _make_context(user_data={"voice_reply": "on"})
 
-    assert orchestrator._should_send_voice(context, "response text", user_message="") is False
+    assert (
+        orchestrator._should_send_voice(context, "response text", user_message="")
+        is False
+    )
 
 
 def test_should_send_voice_on_long_response_with_voice_request(voice_settings, deps):
@@ -274,9 +288,12 @@ def test_should_send_voice_on_long_response_with_voice_request(voice_settings, d
     context = _make_context(user_data={"voice_reply": "on"})
     long_response = " ".join(["word"] * 1000)
 
-    assert orchestrator._should_send_voice(
-        context, long_response, user_message="mandame un audio"
-    ) is True
+    assert (
+        orchestrator._should_send_voice(
+            context, long_response, user_message="mandame un audio"
+        )
+        is True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -289,9 +306,12 @@ def test_should_send_voice_off_returns_false(voice_settings, deps):
     orchestrator = MessageOrchestrator(settings=voice_settings, deps=deps)
     context = _make_context(user_data={"voice_reply": "off"})
 
-    assert orchestrator._should_send_voice(
-        context, "Hello", user_message="en voz por favor"
-    ) is False
+    assert (
+        orchestrator._should_send_voice(
+            context, "Hello", user_message="en voz por favor"
+        )
+        is False
+    )
 
 
 def test_should_send_voice_feature_disabled_returns_false(no_voice_settings, deps):
@@ -299,9 +319,10 @@ def test_should_send_voice_feature_disabled_returns_false(no_voice_settings, dep
     orchestrator = MessageOrchestrator(settings=no_voice_settings, deps=deps)
     context = _make_context(user_data={"voice_reply": "on"})
 
-    assert orchestrator._should_send_voice(
-        context, "Hello", user_message="en voz"
-    ) is False
+    assert (
+        orchestrator._should_send_voice(context, "Hello", user_message="en voz")
+        is False
+    )
 
 
 # ---------------------------------------------------------------------------

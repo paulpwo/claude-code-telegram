@@ -104,7 +104,9 @@ def create_api_app(
 
         @app.get("/admin", include_in_schema=False)
         @app.get("/admin/{rest_of_path:path}", include_in_schema=False)
-        async def serve_admin_spa(rest_of_path: str = "") -> _FileResponse:  # noqa: RUF029
+        async def serve_admin_spa(
+            rest_of_path: str = "",
+        ) -> _FileResponse:  # noqa: RUF029
             return _FileResponse(str(index_html))
 
         logger.info("Admin dashboard enabled", dist_path=str(dist_path))

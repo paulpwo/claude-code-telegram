@@ -13,7 +13,10 @@ from ...security.audit import AuditLogger
 from ...security.validators import SecurityValidator
 from ..utils.html_format import escape_html
 from .command import _handle_model_selection
-from .topics_handler import topics_delete_cancel_callback, topics_delete_confirm_callback
+from .topics_handler import (
+    topics_delete_cancel_callback,
+    topics_delete_confirm_callback,
+)
 
 logger = structlog.get_logger()
 

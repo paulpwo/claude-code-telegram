@@ -65,8 +65,8 @@ class GitIntegration:
         "rev-parse",
         "rev-list",
         "describe",
-        "push",   # authenticated SDD branch push
-        "commit", # SDD branch commit
+        "push",  # authenticated SDD branch push
+        "commit",  # SDD branch commit
     }
 
     # Dangerous patterns to block
@@ -166,9 +166,7 @@ class GitIntegration:
         # Validate URL scheme
         valid_prefixes = ("https://", "git://", "ssh://", "git@")
         if not any(url.startswith(prefix) for prefix in valid_prefixes):
-            raise GitError(
-                "Invalid URL scheme: only https, ssh and git@ are allowed"
-            )
+            raise GitError("Invalid URL scheme: only https, ssh and git@ are allowed")
 
         # Validate destination is within approved directory
         try:

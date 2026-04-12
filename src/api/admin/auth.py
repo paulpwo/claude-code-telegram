@@ -66,7 +66,9 @@ def _issue_token(settings: Settings) -> TokenResponse:
         secret.get_secret_value(),
         algorithm="HS256",
     )
-    return TokenResponse(access_token=token, token_type="bearer", expires_in=ttl_seconds)
+    return TokenResponse(
+        access_token=token, token_type="bearer", expires_in=ttl_seconds
+    )
 
 
 # ---------------------------------------------------------------------------

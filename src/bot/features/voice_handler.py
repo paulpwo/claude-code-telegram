@@ -392,7 +392,9 @@ class VoiceSender:
         elif self.config.tts_engine == "system":
             return await self._synthesize_ogg_system(text, tmp_dir)
         else:  # "edge-tts" default
-            return await self._synthesize_ogg_edge_tts(text, tmp_dir, voice_override=voice_override)
+            return await self._synthesize_ogg_edge_tts(
+                text, tmp_dir, voice_override=voice_override
+            )
 
     # -- edge-tts engine --
 
@@ -620,7 +622,9 @@ class VoiceSender:
         try:
             tmp_dir = Path(tempfile.mkdtemp(prefix="tts_"))
 
-            ogg_path = await self._synthesize_ogg(text, tmp_dir, voice_override=voice_override)
+            ogg_path = await self._synthesize_ogg(
+                text, tmp_dir, voice_override=voice_override
+            )
 
             with open(ogg_path, "rb") as audio_file:
                 await update.message.reply_voice(

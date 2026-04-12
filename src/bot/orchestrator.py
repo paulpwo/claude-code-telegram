@@ -663,15 +663,40 @@ class MessageOrchestrator:
     # --- Voice set helpers ---
 
     _VOICE_COUNTRY_FLAGS: dict = {
-        "AR": "🇦🇷", "ES": "🇪🇸", "MX": "🇲🇽", "CO": "🇨🇴",
-        "US": "🇺🇸", "CL": "🇨🇱", "PE": "🇵🇪", "VE": "🇻🇪",
-        "UY": "🇺🇾", "BO": "🇧🇴", "EC": "🇪🇨", "PY": "🇵🇾",
-        "CR": "🇨🇷", "GT": "🇬🇹", "HN": "🇭🇳", "NI": "🇳🇮",
-        "PA": "🇵🇦", "DO": "🇩🇴", "CU": "🇨🇺", "PR": "🇵🇷",
-        "GB": "🇬🇧", "AU": "🇦🇺", "CA": "🇨🇦", "IN": "🇮🇳",
-        "IE": "🇮🇪", "NZ": "🇳🇿", "PH": "🇵🇭", "SG": "🇸🇬",
-        "ZA": "🇿🇦", "DE": "🇩🇪", "FR": "🇫🇷", "IT": "🇮🇹",
-        "BR": "🇧🇷", "PT": "🇵🇹",
+        "AR": "🇦🇷",
+        "ES": "🇪🇸",
+        "MX": "🇲🇽",
+        "CO": "🇨🇴",
+        "US": "🇺🇸",
+        "CL": "🇨🇱",
+        "PE": "🇵🇪",
+        "VE": "🇻🇪",
+        "UY": "🇺🇾",
+        "BO": "🇧🇴",
+        "EC": "🇪🇨",
+        "PY": "🇵🇾",
+        "CR": "🇨🇷",
+        "GT": "🇬🇹",
+        "HN": "🇭🇳",
+        "NI": "🇳🇮",
+        "PA": "🇵🇦",
+        "DO": "🇩🇴",
+        "CU": "🇨🇺",
+        "PR": "🇵🇷",
+        "GB": "🇬🇧",
+        "AU": "🇦🇺",
+        "CA": "🇨🇦",
+        "IN": "🇮🇳",
+        "IE": "🇮🇪",
+        "NZ": "🇳🇿",
+        "PH": "🇵🇭",
+        "SG": "🇸🇬",
+        "ZA": "🇿🇦",
+        "DE": "🇩🇪",
+        "FR": "🇫🇷",
+        "IT": "🇮🇹",
+        "BR": "🇧🇷",
+        "PT": "🇵🇹",
     }
 
     _VOICES_PER_PAGE: int = 12
@@ -713,12 +738,12 @@ class MessageOrchestrator:
         total_pages = max(1, (total + vpp - 1) // vpp)
         page = max(0, min(page, total_pages - 1))
 
-        page_voices = voices[page * vpp: page * vpp + vpp]
+        page_voices = voices[page * vpp : page * vpp + vpp]
 
         rows = []
         for i in range(0, len(page_voices), 2):
             row = []
-            for name, gender in page_voices[i: i + 2]:
+            for name, gender in page_voices[i : i + 2]:
                 label = MessageOrchestrator._voice_display(name, gender)
                 row.append(
                     InlineKeyboardButton(label, callback_data=f"voice_select:{name}")
@@ -776,7 +801,9 @@ class MessageOrchestrator:
             page = int(page_str)
             voices = await self._fetch_edge_tts_voices(lang)
             if not voices:
-                await query.edit_message_text("Could not load voice list. Is edge-tts installed?")
+                await query.edit_message_text(
+                    "Could not load voice list. Is edge-tts installed?"
+                )
                 return
             kb = self._voice_set_keyboard(voices, page, lang)
             await query.edit_message_reply_markup(reply_markup=kb)
@@ -903,11 +930,12 @@ class MessageOrchestrator:
             return False
 
         mode = context.user_data.get("voice_reply", "off")
+        if mode == "off":
+            return False
         if mode == "on":
-            return True  # always voice — user explicitly enabled it
-        # "auto" and "off": honor explicit one-shot voice requests regardless of mode.
-        # "off" means "don't send voice proactively", not "ignore explicit voice requests".
-        return self._user_wants_voice(user_message)
+            return self._user_wants_voice(user_message)
+        # "auto": send voice when response is short enough
+        return len(response_text.split()) <= self.settings.voice_reply_max_words
 
     def _get_verbose_level(self, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Return effective verbose level: per-user override or global default."""
@@ -1426,9 +1454,12 @@ class MessageOrchestrator:
         if not images and self._should_send_voice(
             context, "", user_message=message_text
         ):
-            full_text = "\n\n".join(
-                m.text for m in formatted_messages if m.text and m.text.strip()
-            ) or None
+            full_text = (
+                "\n\n".join(
+                    m.text for m in formatted_messages if m.text and m.text.strip()
+                )
+                or None
+            )
         else:
             full_text = (
                 formatted_messages[0].text
@@ -1436,8 +1467,10 @@ class MessageOrchestrator:
                 else None
             )
         voice_sent = False
-        if full_text and not images and self._should_send_voice(
-            context, full_text, user_message=message_text
+        if (
+            full_text
+            and not images
+            and self._should_send_voice(context, full_text, user_message=message_text)
         ):
             features = context.bot_data.get("features")
             voice_sender = features.get_voice_sender() if features else None
@@ -1885,12 +1918,13 @@ class MessageOrchestrator:
         # Attempt to send as voice note when user has enabled /voice on|auto.
         # When voice mode is active, join all message parts into one text so that
         # multi-part Claude responses are still delivered as a single voice note.
-        if not images and self._should_send_voice(
-            context, "", user_message=prompt
-        ):
-            full_text = "\n\n".join(
-                m.text for m in formatted_messages if m.text and m.text.strip()
-            ) or None
+        if not images and self._should_send_voice(context, "", user_message=prompt):
+            full_text = (
+                "\n\n".join(
+                    m.text for m in formatted_messages if m.text and m.text.strip()
+                )
+                or None
+            )
         else:
             full_text = (
                 formatted_messages[0].text
@@ -1898,8 +1932,10 @@ class MessageOrchestrator:
                 else None
             )
         voice_sent = False
-        if full_text and not images and self._should_send_voice(
-            context, full_text, user_message=prompt
+        if (
+            full_text
+            and not images
+            and self._should_send_voice(context, full_text, user_message=prompt)
         ):
             features = context.bot_data.get("features")
             voice_sender = features.get_voice_sender() if features else None

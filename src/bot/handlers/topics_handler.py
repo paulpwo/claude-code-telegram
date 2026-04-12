@@ -152,7 +152,9 @@ async def _topics_add(
 
     # Resolve absolute path — treat path_str as either absolute or relative to approved_dir
     raw_path = Path(path_str)
-    abs_path = (raw_path if raw_path.is_absolute() else approved_dir / raw_path).resolve()
+    abs_path = (
+        raw_path if raw_path.is_absolute() else approved_dir / raw_path
+    ).resolve()
 
     try:
         abs_path.relative_to(approved_dir)
@@ -264,9 +266,7 @@ async def _topics_add(
     )
 
 
-async def _topics_list(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def _topics_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /topics list — show all registered projects for this chat."""
     chat_id = update.effective_chat.id
     project_repo: ProjectRepository = context.bot_data["storage"].projects
@@ -313,12 +313,18 @@ async def _topics_delete(
         )
         return
 
-    keyboard = InlineKeyboardMarkup([
+    keyboard = InlineKeyboardMarkup(
         [
-            InlineKeyboardButton("✅ Confirmar", callback_data=f"topics_del_confirm:{slug}"),
-            InlineKeyboardButton("❌ Cancelar", callback_data=f"topics_del_cancel:{slug}"),
+            [
+                InlineKeyboardButton(
+                    "✅ Confirmar", callback_data=f"topics_del_confirm:{slug}"
+                ),
+                InlineKeyboardButton(
+                    "❌ Cancelar", callback_data=f"topics_del_cancel:{slug}"
+                ),
+            ]
         ]
-    ])
+    )
     await update.effective_message.reply_text(
         f"⚠️ ¿Eliminar el proyecto <code>{slug}</code>?\n\n"
         f"Se borrará del registro y se eliminará el directorio del workspace.",
@@ -351,7 +357,9 @@ async def topics_delete_confirm_callback(
         workspace_path = Path(project.absolute_path)
         if workspace_path.exists() and workspace_path.is_dir():
             shutil.rmtree(workspace_path, ignore_errors=True)
-            logger.info("Workspace directory removed", path=str(workspace_path), slug=slug)
+            logger.info(
+                "Workspace directory removed", path=str(workspace_path), slug=slug
+            )
 
     # Deactivate the thread mapping
     await context.bot_data["storage"].project_threads.set_active(
@@ -367,7 +375,9 @@ async def topics_delete_confirm_callback(
             chat_id=chat_id,
         )
         manager.registry = registry
-        logger.info("Registry reloaded after topics delete confirm", slug=slug, chat_id=chat_id)
+        logger.info(
+            "Registry reloaded after topics delete confirm", slug=slug, chat_id=chat_id
+        )
 
     await query.edit_message_text(
         f"✅ Proyecto <code>{slug}</code> eliminado.",

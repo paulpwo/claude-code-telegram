@@ -83,7 +83,7 @@ def deps():
 
 
 def test_agentic_registers_8_commands(agentic_settings, deps):
-    """Agentic mode registers start, new, status, verbose, repo, model, restart, sdd commands."""
+    """Agentic mode registers start, new, status, verbose, repo, model, restart, sdd, git, topics commands."""
     orchestrator = MessageOrchestrator(agentic_settings, deps)
     app = MagicMock()
     app.add_handler = MagicMock()
@@ -100,7 +100,7 @@ def test_agentic_registers_8_commands(agentic_settings, deps):
     ]
     commands = [h[0][0].commands for h in cmd_handlers]
 
-    assert len(cmd_handlers) == 8
+    assert len(cmd_handlers) == 10
     assert frozenset({"start"}) in commands
     assert frozenset({"new"}) in commands
     assert frozenset({"status"}) in commands
@@ -109,6 +109,8 @@ def test_agentic_registers_8_commands(agentic_settings, deps):
     assert frozenset({"model"}) in commands
     assert frozenset({"restart"}) in commands
     assert frozenset({"sdd"}) in commands
+    assert frozenset({"git"}) in commands
+    assert frozenset({"topics"}) in commands
 
 
 def test_classic_registers_15_commands(classic_settings, deps):
@@ -127,7 +129,7 @@ def test_classic_registers_15_commands(classic_settings, deps):
         if isinstance(call[0][0], CommandHandler)
     ]
 
-    assert len(cmd_handlers) == 15
+    assert len(cmd_handlers) == 16
 
 
 def test_agentic_registers_text_document_photo_handlers(agentic_settings, deps):
@@ -153,26 +155,37 @@ def test_agentic_registers_text_document_photo_handlers(agentic_settings, deps):
 
     # 5 message handlers (text, document, photo, voice, unknown commands passthrough)
     assert len(msg_handlers) == 5
-    # 3 callback handlers (stop: + model/effort: + cd:)
-    assert len(cb_handlers) == 3
+    # 5 callback handlers (stop: + model/effort: + cd: + voice_ + topics_del_)
+    assert len(cb_handlers) == 5
 
 
 async def test_agentic_bot_commands(agentic_settings, deps):
-    """Agentic mode returns 8 bot commands including /model and /sdd."""
+    """Agentic mode returns 10 bot commands including /model, /sdd, /git, /topics."""
     orchestrator = MessageOrchestrator(agentic_settings, deps)
     commands = await orchestrator.get_bot_commands()
 
-    assert len(commands) == 8
+    assert len(commands) == 10
     cmd_names = [c.command for c in commands]
-    assert cmd_names == ["start", "new", "status", "verbose", "repo", "model", "restart", "sdd"]
+    assert cmd_names == [
+        "start",
+        "new",
+        "status",
+        "verbose",
+        "repo",
+        "model",
+        "restart",
+        "sdd",
+        "git",
+        "topics",
+    ]
 
 
 async def test_classic_bot_commands(classic_settings, deps):
-    """Classic mode returns 15 bot commands."""
+    """Classic mode returns 16 bot commands."""
     orchestrator = MessageOrchestrator(classic_settings, deps)
     commands = await orchestrator.get_bot_commands()
 
-    assert len(commands) == 15
+    assert len(commands) == 16
     cmd_names = [c.command for c in commands]
     assert "start" in cmd_names
     assert "help" in cmd_names
@@ -341,7 +354,7 @@ async def test_agentic_callback_scoped_to_cd_pattern(agentic_settings, deps):
         if isinstance(call[0][0], CallbackQueryHandler)
     ]
 
-    assert len(cb_handlers) == 3
+    assert len(cb_handlers) == 5
     # Find the cd: handler by pattern
     cd_handler = [h for h in cb_handlers if h.pattern and h.pattern.match("cd:x")]
     assert len(cd_handler) == 1
@@ -902,7 +915,9 @@ async def test_private_mode_start_inside_topic_uses_thread_context(
     assert captured["dir"] == project_path
 
 
-async def test_private_mode_allows_plain_dm_outside_topics(private_thread_settings, deps):
+async def test_private_mode_allows_plain_dm_outside_topics(
+    private_thread_settings, deps
+):
     """Private mode allows any command in a plain DM (no thread_id).
 
     Plain DMs are never gated by thread routing — they use the default

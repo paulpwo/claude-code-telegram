@@ -281,7 +281,9 @@ class TokenAuthProvider(AuthProvider):
 
     def _hash_token(self, token: str) -> str:
         """Hash token for secure storage using scrypt KDF."""
-        secret_bytes = self.secret.encode() if isinstance(self.secret, str) else self.secret
+        secret_bytes = (
+            self.secret.encode() if isinstance(self.secret, str) else self.secret
+        )
         salt = secret_bytes[:16].ljust(16, b"\x00")
         return hashlib.scrypt(
             token.encode(), salt=salt, n=16384, r=8, p=1, dklen=32

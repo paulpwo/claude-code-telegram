@@ -111,7 +111,18 @@ async def test_list_with_jobs(update, context, mock_scheduler):
 
 async def test_add_success(update, context, mock_scheduler, tmp_dir):
     """Add creates a job with correct parameters."""
-    context.args = ["add", "my-job", "0", "9", "*", "*", "1-5", "Run", "status", "check"]
+    context.args = [
+        "add",
+        "my-job",
+        "0",
+        "9",
+        "*",
+        "*",
+        "1-5",
+        "Run",
+        "status",
+        "check",
+    ]
     await schedule_command(update, context)
 
     mock_scheduler.add_job.assert_called_once_with(

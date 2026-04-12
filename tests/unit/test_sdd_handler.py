@@ -16,7 +16,6 @@ from src.bot.handlers.sdd_handler import (
 from src.config import create_test_config
 from src.config.features import FeatureFlags
 
-
 # ---------------------------------------------------------------------------
 # Tests for _is_github_issue_url()
 # ---------------------------------------------------------------------------
@@ -243,7 +242,9 @@ async def test_sdd_command_no_arg_replies_usage_and_does_not_call_claude(
 
     call_args = update.message.reply_text.call_args
     reply_text = call_args[0][0]
-    assert "Usage" in reply_text or "usage" in reply_text.lower() or "/sdd" in reply_text
+    assert (
+        "Usage" in reply_text or "usage" in reply_text.lower() or "/sdd" in reply_text
+    )
     claude_integration.run_command.assert_not_called()
 
 

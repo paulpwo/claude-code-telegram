@@ -296,40 +296,40 @@ def test_project_threads_validation_requires_chat_id_in_group_mode(tmp_path):
     assert "project_threads_chat_id required" in str(exc_info.value)
 
 
-def test_project_threads_validation_requires_projects_config(tmp_path):
-    """Thread mode requires projects_config_path."""
+def test_project_threads_validation_db_only_mode_valid(tmp_path):
+    """Thread mode without projects_config_path is valid — DB-only mode."""
     project_dir = tmp_path / "projects"
     project_dir.mkdir()
 
-    with pytest.raises(ValidationError) as exc_info:
-        Settings(
-            telegram_bot_token="test_token",
-            telegram_bot_username="test_bot",
-            approved_directory=str(project_dir),
-            enable_project_threads=True,
-            project_threads_chat_id=-1001234567890,
-            projects_config_path=None,
-        )
+    # Should NOT raise — DB-only mode is a valid configuration
+    settings = Settings(
+        telegram_bot_token="test_token",
+        telegram_bot_username="test_bot",
+        approved_directory=str(project_dir),
+        enable_project_threads=True,
+        project_threads_chat_id=-1001234567890,
+        projects_config_path=None,
+    )
+    assert settings.projects_config_path is None
 
-    assert "projects_config_path required" in str(exc_info.value)
 
-
-def test_project_threads_validation_blank_projects_config_path_fails(tmp_path):
-    """Blank projects_config_path should be treated as missing."""
+def test_project_threads_validation_blank_projects_config_path_treated_as_none(
+    tmp_path,
+):
+    """Blank projects_config_path is treated as None — DB-only mode is valid."""
     project_dir = tmp_path / "projects"
     project_dir.mkdir()
 
-    with pytest.raises(ValidationError) as exc_info:
-        Settings(
-            telegram_bot_token="test_token",
-            telegram_bot_username="test_bot",
-            approved_directory=str(project_dir),
-            enable_project_threads=True,
-            project_threads_mode="private",
-            projects_config_path="",
-        )
-
-    assert "projects_config_path required" in str(exc_info.value)
+    # Blank string → None → DB-only mode (valid, no error)
+    settings = Settings(
+        telegram_bot_token="test_token",
+        telegram_bot_username="test_bot",
+        approved_directory=str(project_dir),
+        enable_project_threads=True,
+        project_threads_mode="private",
+        projects_config_path="",
+    )
+    assert settings.projects_config_path is None
 
 
 def test_project_threads_validation_private_mode_no_chat_id(tmp_path):

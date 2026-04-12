@@ -156,9 +156,7 @@ class IssueWebhookFilter:
     # Internals
     # ------------------------------------------------------------------
 
-    def _check_label(
-        self, action: str, payload: Dict[str, Any]
-    ) -> tuple[bool, str]:
+    def _check_label(self, action: str, payload: Dict[str, Any]) -> tuple[bool, str]:
         """Verify that the required label is present.
 
         - For ``opened``: the label must already be on the issue.

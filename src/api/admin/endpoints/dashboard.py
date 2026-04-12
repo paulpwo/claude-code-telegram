@@ -83,9 +83,7 @@ async def get_summary(request: Request) -> Dict[str, Any]:
             "SELECT COALESCE(SUM(daily_cost), 0) FROM cost_tracking WHERE date >= ?",
             (month_start,),
         )
-        cost_total = await _qf(
-            conn, "SELECT COALESCE(SUM(total_cost), 0) FROM users"
-        )
+        cost_total = await _qf(conn, "SELECT COALESCE(SUM(total_cost), 0) FROM users")
 
         # ── webhook events 24 h ───────────────────────────────────────────────
         total_events_24h = await _q1(
@@ -132,8 +130,7 @@ async def get_summary(request: Request) -> Dict[str, Any]:
         # ── recent audit log ──────────────────────────────────────────────────
         recent_activity: List[Dict[str, Any]] = []
         try:
-            cur = await conn.execute(
-                """
+            cur = await conn.execute("""
                 SELECT a.id,
                        u.telegram_username,
                        a.event_type,
@@ -143,8 +140,7 @@ async def get_summary(request: Request) -> Dict[str, Any]:
                 LEFT JOIN users u ON a.user_id = u.user_id
                 ORDER BY a.timestamp DESC
                 LIMIT 8
-                """
-            )
+                """)
             rows = await cur.fetchall()
             for r in rows:
                 ts_raw = r[4]

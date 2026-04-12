@@ -47,7 +47,9 @@ def _parse_sdd_summary(
     branch_match = _BRANCH_RE.search(response_text)
     branch_name = branch_match.group(1) if branch_match else None
 
-    repo_match = _GITHUB_REPO_RE.search(issue_url) or _GITHUB_REPO_RE.search(response_text)
+    repo_match = _GITHUB_REPO_RE.search(issue_url) or _GITHUB_REPO_RE.search(
+        response_text
+    )
     if repo_match:
         owner = repo_match.group(1)
         repo = repo_match.group(2).rstrip("/")
@@ -55,6 +57,7 @@ def _parse_sdd_summary(
         owner = repo = None
 
     return branch_name, owner, repo
+
 
 # Regex for detecting GitHub issue URLs
 _GITHUB_ISSUE_RE = re.compile(
@@ -92,7 +95,9 @@ def _build_sdd_prompt(
     Returns:
         A fully formed prompt string ready to pass to ClaudeIntegration.run_command().
     """
-    protected_str = ", ".join(protected_branches) if protected_branches else "main, master, develop"
+    protected_str = (
+        ", ".join(protected_branches) if protected_branches else "main, master, develop"
+    )
 
     if is_url:
         issue_block = (
@@ -131,12 +136,19 @@ Instructions:
    - Free-text input: {{Type}}/{{DescriptionInPascalCase}}            (e.g. Fix/LoginCrashOnExpiredToken)
 
 5. Explore the repo structure — focus on directories relevant to the issue.
-6. Write .agent/planning/sdd.md — what to implement, acceptance criteria.
-7. Write .agent/context/files.md — relevant files and their role.
-8. Write .agent/context/approach.md — suggested approach, alternatives, tradeoffs.
-9. Run: git add .agent/ && git commit -m "📝 docs(analysis): agregar pre-análisis {arg[:60] if not is_url else 'issue #' + str(_extract_issue_number(arg) or '?')}"
-10. Run: git push origin <branch-name>
-11. RESTRICTIONS:
+
+6. Determine the output directory for this analysis using the branch name from step 4.
+   The branch name (e.g. "Feat/Issue5AddDarkMode") maps directly to a subdirectory:
+   - Branch "Feat/Issue5AddDarkMode"   → .agent/Feat/Issue5AddDarkMode/
+   - Branch "Fix/LoginCrashOnExpiredToken" → .agent/Fix/LoginCrashOnExpiredToken/
+   Use this directory for ALL files in steps 7-9. Never write to a generic .agent/planning/ or .agent/context/.
+
+7. Write .agent/<Type>/<BranchSlug>/planning.md — what to implement, acceptance criteria.
+8. Write .agent/<Type>/<BranchSlug>/files.md — relevant files and their role.
+9. Write .agent/<Type>/<BranchSlug>/approach.md — suggested approach, alternatives, tradeoffs.
+10. Run: git add .agent/ && git commit -m "📝 docs(analysis): agregar pre-análisis {arg[:60] if not is_url else 'issue #' + str(_extract_issue_number(arg) or '?')}"
+11. Run: git push origin <branch-name>
+12. RESTRICTIONS:
     - DO NOT modify any existing source file outside .agent/
     - DO NOT open a Pull Request
     - DO NOT run tests or builds
@@ -144,7 +156,8 @@ Instructions:
 
 End with a brief summary containing:
 - Branch name created and base branch used
-- Files written under .agent/
+- Directory created under .agent/ (full path)
+- Files written
 - One-line problem statement
 """
     return prompt
@@ -370,7 +383,9 @@ async def _try_auto_pr(
         fernet = Fernet(encryption_key.get_secret_value().encode())
         pat = fernet.decrypt(encrypted).decode()
     except (InvalidToken, Exception) as e:
-        logger.error("SDD auto-PR: could not decrypt PAT", error=str(e), user_id=user_id)
+        logger.error(
+            "SDD auto-PR: could not decrypt PAT", error=str(e), user_id=user_id
+        )
         return
 
     # Parse branch and repo — prefer git subprocess over response regex

@@ -17,9 +17,7 @@ def _get_scheduler(context: ContextTypes.DEFAULT_TYPE) -> JobScheduler | None:
     return context.bot_data.get("scheduler")
 
 
-async def schedule_command(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def schedule_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /schedule command with subcommands.
 
     Usage:
@@ -159,9 +157,7 @@ async def _handle_remove(
 
     job_id = args[0]
     await scheduler.remove_job(job_id)
-    await update.message.reply_html(
-        f"Job <code>{escape_html(job_id)}</code> removed."
-    )
+    await update.message.reply_html(f"Job <code>{escape_html(job_id)}</code> removed.")
 
 
 async def _handle_pause(
@@ -197,4 +193,6 @@ async def _handle_resume(
             f"Job <code>{escape_html(job_id)}</code> resumed."
         )
     else:
-        await update.message.reply_text(f"Job '{job_id}' not found or failed to resume.")
+        await update.message.reply_text(
+            f"Job '{job_id}' not found or failed to resume."
+        )

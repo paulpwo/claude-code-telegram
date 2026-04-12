@@ -26,7 +26,6 @@ from src.bot.handlers.command import (
 )
 from src.config.settings import Settings
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -124,7 +123,10 @@ async def test_select_haiku_skips_effort(callback_query, context):
     assert context.user_data["model_override"] == "haiku"
     # Final message, no reply_markup (no effort keyboard)
     call_kwargs = callback_query.edit_message_text.call_args
-    assert "reply_markup" not in call_kwargs.kwargs or call_kwargs.kwargs.get("reply_markup") is None
+    assert (
+        "reply_markup" not in call_kwargs.kwargs
+        or call_kwargs.kwargs.get("reply_markup") is None
+    )
     assert "ready" in call_kwargs.args[0].lower()
 
 

@@ -68,9 +68,7 @@ async def list_crons(request: Request) -> Dict[str, Any]:
     scheduler = get_scheduler(request)
 
     async with db.get_connection() as conn:
-        cursor = await conn.execute(
-            "SELECT * FROM scheduled_jobs ORDER BY created_at"
-        )
+        cursor = await conn.execute("SELECT * FROM scheduled_jobs ORDER BY created_at")
         rows = await cursor.fetchall()
 
     jobs: List[Dict[str, Any]] = [_job_to_dict(dict(row)) for row in rows]
@@ -202,9 +200,7 @@ async def trigger_cron(job_id: str, request: Request) -> Dict[str, Any]:
     row_dict = dict(row)
     chat_ids_str = row_dict.get("target_chat_ids", "")
     chat_ids: List[int] = (
-        [int(x) for x in chat_ids_str.split(",") if x.strip()]
-        if chat_ids_str
-        else []
+        [int(x) for x in chat_ids_str.split(",") if x.strip()] if chat_ids_str else []
     )
 
     # Fire event asynchronously — do not await the result
@@ -220,5 +216,7 @@ async def trigger_cron(job_id: str, request: Request) -> Dict[str, Any]:
         )
     )
 
-    logger.info("Admin triggered cron job", job_id=job_id, job_name=row_dict["job_name"])
+    logger.info(
+        "Admin triggered cron job", job_id=job_id, job_name=row_dict["job_name"]
+    )
     return {"job_id": job_id, "status": "triggered"}
