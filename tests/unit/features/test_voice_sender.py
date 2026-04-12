@@ -55,20 +55,26 @@ def _make_update(reply_voice_mock: AsyncMock | None = None) -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_synthesize_ogg_success(voice_sender, tmp_path):
-    """_synthesize_ogg returns a Path when edge-tts exits 0."""
+    """_synthesize_ogg returns a Path when edge-tts Python API succeeds."""
+    mock_communicate = MagicMock()
+    mock_communicate.save = AsyncMock()
+
+    mock_edge_tts = MagicMock()
+    mock_edge_tts.Communicate = MagicMock(return_value=mock_communicate)
+
     good_proc = _make_process(returncode=0)
 
-    with patch(
-        "asyncio.create_subprocess_exec", AsyncMock(return_value=good_proc)
-    ) as mock_exec:
+    with (
+        patch.dict("sys.modules", {"edge_tts": mock_edge_tts}),
+        patch("asyncio.create_subprocess_exec", AsyncMock(return_value=good_proc)),
+    ):
         result = await voice_sender._synthesize_ogg("Hello world", tmp_path)
 
     assert isinstance(result, Path)
     assert result.name == "reply.ogg"
     assert result.parent == tmp_path
-    mock_exec.assert_called_once()
-    # Verify voice name is passed
-    call_args = mock_exec.call_args[0]
+    # Verify voice name is passed to Communicate constructor
+    call_args = mock_edge_tts.Communicate.call_args[0]
     assert "es-AR-TomasNeural" in call_args
 
 
@@ -79,10 +85,14 @@ async def test_synthesize_ogg_success(voice_sender, tmp_path):
 
 @pytest.mark.asyncio
 async def test_synthesize_ogg_nonzero_exit_raises(voice_sender, tmp_path):
-    """_synthesize_ogg raises RuntimeError when edge-tts returns non-zero exit code."""
-    fail_proc = _make_process(returncode=1, stderr=b"error: voice not found")
+    """_synthesize_ogg raises RuntimeError when edge-tts Python API raises."""
+    mock_communicate = MagicMock()
+    mock_communicate.save = AsyncMock(side_effect=Exception("voice not found"))
 
-    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=fail_proc)):
+    mock_edge_tts = MagicMock()
+    mock_edge_tts.Communicate = MagicMock(return_value=mock_communicate)
+
+    with patch.dict("sys.modules", {"edge_tts": mock_edge_tts}):
         with pytest.raises(RuntimeError, match="synthesis failed"):
             await voice_sender._synthesize_ogg("Hello", tmp_path)
 
@@ -94,10 +104,8 @@ async def test_synthesize_ogg_nonzero_exit_raises(voice_sender, tmp_path):
 
 @pytest.mark.asyncio
 async def test_synthesize_ogg_binary_missing_raises(voice_sender, tmp_path):
-    """_synthesize_ogg raises RuntimeError with install hint when edge-tts not on PATH."""
-    with patch(
-        "asyncio.create_subprocess_exec", side_effect=FileNotFoundError("edge-tts")
-    ):
+    """_synthesize_ogg raises RuntimeError with install hint when edge-tts not installed."""
+    with patch.dict("sys.modules", {"edge_tts": None}):  # type: ignore[dict-item]
         with pytest.raises(RuntimeError, match="pip install edge-tts"):
             await voice_sender._synthesize_ogg("Hello", tmp_path)
 
@@ -109,15 +117,16 @@ async def test_synthesize_ogg_binary_missing_raises(voice_sender, tmp_path):
 
 @pytest.mark.asyncio
 async def test_synthesize_ogg_timeout_kills_process(voice_sender, tmp_path):
-    """_synthesize_ogg kills the process and raises RuntimeError on timeout."""
-    slow_proc = _make_process(returncode=0)
-    slow_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+    """_synthesize_ogg raises RuntimeError on edge-tts synthesis timeout."""
+    mock_communicate = MagicMock()
+    mock_communicate.save = AsyncMock(side_effect=asyncio.TimeoutError())
 
-    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=slow_proc)):
+    mock_edge_tts = MagicMock()
+    mock_edge_tts.Communicate = MagicMock(return_value=mock_communicate)
+
+    with patch.dict("sys.modules", {"edge_tts": mock_edge_tts}):
         with pytest.raises(RuntimeError, match="timed out"):
             await voice_sender._synthesize_ogg("Hello", tmp_path)
-
-    slow_proc.kill.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +142,7 @@ async def test_send_voice_reply_success_cleans_tmp(voice_sender, tmp_path):
     update = _make_update(reply_voice_mock=reply_voice)
 
     # Patch _synthesize_ogg to write a real (empty) file so open() works
-    async def fake_synthesize(text: str, td: Path) -> Path:
+    async def fake_synthesize(text: str, td: Path, voice_override: str | None = None) -> Path:
         p = td / "reply.ogg"
         p.write_bytes(b"fake-ogg-data")
         return p
@@ -171,7 +180,7 @@ async def test_send_voice_reply_failure_returns_false(voice_sender, tmp_path):
     """send_voice_reply returns False when synthesis raises, with no file leak."""
     update = _make_update()
 
-    async def fail_synthesize(text: str, td: Path) -> Path:
+    async def fail_synthesize(text: str, td: Path, voice_override: str | None = None) -> Path:
         raise RuntimeError("edge-tts not found")
 
     captured_tmp_dirs: list = []
