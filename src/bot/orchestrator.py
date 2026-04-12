@@ -931,9 +931,7 @@ class MessageOrchestrator:
         if not self.settings.enable_voice_replies:
             return False
 
-        default_mode = (
-            "auto" if self.settings.voice_reply_mode == "auto" else "off"
-        )
+        default_mode = "auto" if self.settings.voice_reply_mode == "auto" else "off"
         mode = context.user_data.get("voice_reply", default_mode)
         if mode == "off":
             return False
