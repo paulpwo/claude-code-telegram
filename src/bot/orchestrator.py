@@ -918,16 +918,23 @@ class MessageOrchestrator:
         """Return True if the reply should be sent as a voice note.
 
         Logic:
-        - voice_reply == "off"  → always False (default)
+        - voice_reply == "off"  → always False
         - voice_reply == "on"   → True only when the user's message explicitly
                                    requests a voice reply (keyword detection)
         - voice_reply == "auto" → True when word count of *response* ≤
                                    voice_reply_max_words, ignoring user intent
+
+        Default mode is derived from VOICE_REPLY_MODE config:
+        - "manual" → default "off" (user must /voice on)
+        - "auto"   → default "auto" (voice replies enabled automatically)
         """
         if not self.settings.enable_voice_replies:
             return False
 
-        mode = context.user_data.get("voice_reply", "off")
+        default_mode = (
+            "auto" if self.settings.voice_reply_mode == "auto" else "off"
+        )
+        mode = context.user_data.get("voice_reply", default_mode)
         if mode == "off":
             return False
         if mode == "on":
