@@ -92,8 +92,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install edge-tts (TTS for voice replies)
-RUN pip install --no-cache-dir edge-tts
+# Install TTS engines (edge-tts default, openai optional)
+RUN pip install --no-cache-dir edge-tts openai
 
 # Copy pre-installed Python packages from builder
 COPY --from=builder /install /usr/local
