@@ -110,30 +110,40 @@ Protected branches (NEVER push to these): {protected_str}
 
 Instructions:
 1. If a GitHub URL was provided, run: gh issue view {arg if is_url else '<url>'} to fetch the issue title and body.
-2. Infer branch type from the issue content:
-   - Bug report → Fix
-   - New feature → Feat
-   - Refactoring → Refactor
-   - Documentation → Docs
-   - Everything else → Chore
-3. Create a new branch following the naming convention:
-   - For numbered issues: {{Tipo}}/Issue{{N}}{{DescripcionEnPascalCase}}  (e.g. Feat/Issue5AddDarkMode)
-   - For free-text input: {{Tipo}}/{{DescripcionEnPascalCase}}            (e.g. Feat/AddDarkModeToSettingsPage)
-   Run: git checkout -b <branch-name>
-4. Explore the repo structure — focus on directories relevant to the issue.
-5. Write .agent/planning/sdd.md — what to implement, acceptance criteria.
-6. Write .agent/context/files.md — relevant files and their role.
-7. Write .agent/context/approach.md — suggested approach, alternatives, tradeoffs.
-8. Run: git add .agent/ && git commit -m "📝 docs(analysis): agregar pre-análisis {arg[:60] if not is_url else 'issue #' + str(_extract_issue_number(arg) or '?')}"
-9. Run: git push origin <branch-name>
-10. RESTRICTIONS:
+
+2. Infer branch type from the issue/description content:
+   - Bug report, crash, error, regression → Fix  → base branch: main
+   - New feature, enhancement, improvement → Feat → base branch: develop
+   - Refactoring, cleanup               → Refactor → base branch: develop
+   - Documentation                      → Docs     → base branch: develop
+   - Everything else                    → Chore    → base branch: develop
+   If the repo does not have a "develop" branch, use "main" as the base for everything.
+
+3. Determine the base branch:
+   Run: git branch -r
+   Use the branching rule above. If the required base branch does not exist remotely, fall back to main.
+
+4. Create a new branch from the correct base:
+   Run: git fetch origin
+   Run: git checkout -b <branch-name> origin/<base-branch>
+   Branch naming:
+   - Numbered issues: {{Type}}/Issue{{N}}{{DescriptionInPascalCase}}  (e.g. Feat/Issue5AddDarkMode)
+   - Free-text input: {{Type}}/{{DescriptionInPascalCase}}            (e.g. Fix/LoginCrashOnExpiredToken)
+
+5. Explore the repo structure — focus on directories relevant to the issue.
+6. Write .agent/planning/sdd.md — what to implement, acceptance criteria.
+7. Write .agent/context/files.md — relevant files and their role.
+8. Write .agent/context/approach.md — suggested approach, alternatives, tradeoffs.
+9. Run: git add .agent/ && git commit -m "📝 docs(analysis): agregar pre-análisis {arg[:60] if not is_url else 'issue #' + str(_extract_issue_number(arg) or '?')}"
+10. Run: git push origin <branch-name>
+11. RESTRICTIONS:
     - DO NOT modify any existing source file outside .agent/
     - DO NOT open a Pull Request
     - DO NOT run tests or builds
     - DO NOT push to any protected branch ({protected_str})
 
 End with a brief summary containing:
-- Branch name created
+- Branch name created and base branch used
 - Files written under .agent/
 - One-line problem statement
 """
