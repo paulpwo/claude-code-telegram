@@ -99,6 +99,102 @@ class WhitelistAuthProvider(AuthProvider):
         return None
 
 
+class DatabaseAuthProvider(AuthProvider):
+    """Auth provider backed by the approved_users DB table.
+
+    Supports auto-approval: when enabled, users messaging from a configured
+    private group are automatically inserted into the table.
+    """
+
+    def __init__(
+        self,
+        db: Any,
+        auto_approve: bool = False,
+        auto_approve_chat_id: Optional[int] = None,
+        admin_user_ids: Optional[List[int]] = None,
+    ):
+        self._db = db
+        self._auto_approve = auto_approve
+        self._auto_approve_chat_id = auto_approve_chat_id
+        self.admin_user_ids: set = set(admin_user_ids or [])
+        logger.info(
+            "Database auth provider initialized",
+            auto_approve=auto_approve,
+            auto_approve_chat_id=auto_approve_chat_id,
+        )
+
+    async def is_approved(self, user_id: int) -> bool:
+        """Check if user exists in the approved_users table."""
+        async with self._db.get_connection() as conn:
+            cursor = await conn.execute(
+                "SELECT 1 FROM approved_users WHERE user_id = ?",
+                (user_id,),
+            )
+            row = await cursor.fetchone()
+        return row is not None
+
+    async def approve_user(
+        self,
+        user_id: int,
+        username: Optional[str] = None,
+        first_name: Optional[str] = None,
+        approved_by: str = "manual",
+    ) -> None:
+        """Insert a user into approved_users (idempotent)."""
+        async with self._db.get_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO approved_users (user_id, username, first_name, approved_by)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    username = excluded.username,
+                    first_name = excluded.first_name
+                """,
+                (user_id, username, first_name, approved_by),
+            )
+            await conn.commit()
+        logger.info(
+            "User approved",
+            user_id=user_id,
+            username=username,
+            approved_by=approved_by,
+        )
+
+    async def authenticate(self, user_id: int, credentials: Dict[str, Any]) -> bool:
+        """Authenticate against approved_users table, with optional auto-approve."""
+        if await self.is_approved(user_id):
+            return True
+
+        # Auto-approve: if message comes from the configured private group
+        if self._auto_approve and self._auto_approve_chat_id is not None:
+            chat_id = credentials.get("chat_id")
+            if chat_id == self._auto_approve_chat_id:
+                username = credentials.get("username")
+                first_name = credentials.get("first_name")
+                await self.approve_user(
+                    user_id,
+                    username=username,
+                    first_name=first_name,
+                    approved_by="auto_group",
+                )
+                return True
+
+        return False
+
+    async def get_user_info(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Get user information if approved."""
+        if not await self.is_approved(user_id):
+            return None
+        permissions = ["basic"]
+        if user_id in self.admin_user_ids:
+            permissions.append("admin")
+        return {
+            "user_id": user_id,
+            "auth_type": "database",
+            "permissions": permissions,
+        }
+
+
 class TokenStorage(ABC):
     """Abstract token storage interface."""
 

@@ -373,6 +373,15 @@ class Settings(BaseSettings):
     enable_telemetry: bool = Field(False, description="Enable anonymous telemetry")
     sentry_dsn: Optional[str] = Field(None, description="Sentry DSN for error tracking")
 
+    # Auto-approve group members
+    auto_approve_group_members: bool = Field(
+        False,
+        description=(
+            "Auto-register new users who message in the configured private group. "
+            "The private group membership acts as the security layer."
+        ),
+    )
+
     # Development
     debug: bool = Field(False, description="Enable debug mode")
     development_mode: bool = Field(False, description="Enable development features")

@@ -61,8 +61,25 @@ async def auth_middleware(handler: Callable, event: Any, data: Dict[str, Any]) -
         "Attempting authentication for user", user_id=user_id, username=username
     )
 
-    # Try to authenticate (providers will check whitelist and tokens)
-    authentication_successful = await auth_manager.authenticate_user(user_id)
+    # Build credentials with chat context for auto-approve providers
+    chat_id = (
+        event.effective_chat.id if getattr(event, "effective_chat", None) else None
+    )
+    first_name = (
+        getattr(event.effective_user, "first_name", None)
+        if event.effective_user
+        else None
+    )
+    credentials = {
+        "chat_id": chat_id,
+        "username": username,
+        "first_name": first_name,
+    }
+
+    # Try to authenticate (providers will check DB, whitelist, tokens)
+    authentication_successful = await auth_manager.authenticate_user(
+        user_id, credentials=credentials
+    )
 
     # Log authentication attempt
     if audit_logger:

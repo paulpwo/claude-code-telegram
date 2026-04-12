@@ -369,6 +369,23 @@ class DatabaseManager:
                     ON webhook_confirmations(expires_at);
                 """,
             ),
+            (
+                7,
+                """
+                -- Auto-approved users (replaces env-based ALLOWED_USERS)
+                CREATE TABLE IF NOT EXISTS approved_users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL UNIQUE,
+                    username TEXT,
+                    first_name TEXT,
+                    approved_by TEXT NOT NULL DEFAULT 'manual',
+                    approved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_approved_users_user_id
+                    ON approved_users(user_id);
+                """,
+            ),
         ]
 
     async def _init_pool(self):

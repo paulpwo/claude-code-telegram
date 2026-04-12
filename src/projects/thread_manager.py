@@ -104,6 +104,15 @@ class ProjectThreadManager:
                     error=str(e),
                 )
 
+        # Guard: never deactivate all mappings when the registry is empty —
+        # an empty registry likely means a config issue, not "remove everything".
+        if not active_slugs:
+            logger.warning(
+                "Skipping stale-topic cleanup: project registry is empty",
+                chat_id=chat_id,
+            )
+            return result
+
         stale_mappings = await self.repository.list_stale_active_mappings(
             chat_id=chat_id,
             active_project_slugs=active_slugs,

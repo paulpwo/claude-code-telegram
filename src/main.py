@@ -34,6 +34,7 @@ from src.scheduler.scheduler import JobScheduler
 from src.security.audit import AuditLogger, InMemoryAuditStorage
 from src.security.auth import (
     AuthenticationManager,
+    DatabaseAuthProvider,
     DatabaseTokenStorage,
     TokenAuthProvider,
     WhitelistAuthProvider,
@@ -111,7 +112,18 @@ async def create_application(config: Settings) -> Dict[str, Any]:
     # Create security components
     providers = []
 
-    # Add whitelist provider if users are configured
+    # Database auth provider (primary) — checks approved_users table
+    # Resolve auto-approve chat_id: use PROJECT_THREADS_CHAT_ID for group mode
+    auto_approve_chat_id = getattr(config, "project_threads_chat_id", None)
+    db_auth = DatabaseAuthProvider(
+        db=storage.db_manager,
+        auto_approve=config.auto_approve_group_members,
+        auto_approve_chat_id=auto_approve_chat_id,
+        admin_user_ids=config.admin_user_ids,
+    )
+    providers.append(db_auth)
+
+    # Legacy whitelist fallback (ALLOWED_USERS env var)
     if config.allowed_users:
         providers.append(
             WhitelistAuthProvider(
@@ -132,8 +144,6 @@ async def create_application(config: Settings) -> Dict[str, Any]:
             " - creating development-only allow-all provider"
         )
         providers.append(WhitelistAuthProvider([], allow_all_dev=True))
-    elif not providers:
-        raise ConfigurationError("No authentication providers configured")
 
     auth_manager = AuthenticationManager(providers)
     security_validator = SecurityValidator(
