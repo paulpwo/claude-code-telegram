@@ -374,30 +374,46 @@ class TestServerIssueWebhookIntegration:
     def _published_types(self, mock_publish: AsyncMock) -> set[str]:
         return {type(call.args[0]).__name__ for call in mock_publish.call_args_list}
 
-    def test_issue_opened_with_label_publishes_scheduled_event(self) -> None:
-        """Matching issue triggers notification + ScheduledEvent on bus."""
+    def test_issue_opened_with_label_sends_confirmation_menu(self) -> None:
+        """Matching issue sends confirmation menu (AgentResponseEvent), not ScheduledEvent."""
+        from unittest.mock import patch
+
         bus, mock_pub = self._make_bus_with_mock_publish()
         settings = _make_settings(enable_issue_webhook=True)
+        db_manager = MagicMock()
 
-        app = create_api_app(
-            bus,
-            settings,
-            working_directory=Path("/tmp"),
-            notification_chat_ids=[456],
-        )
-        client = TestClient(app)
+        with (
+            patch(
+                "src.api.server.try_record_issue_seen",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch("src.api.server.WebhookConfirmationRepository") as mock_repo_cls,
+        ):
+            mock_repo = AsyncMock()
+            mock_repo.insert.return_value = 42
+            mock_repo_cls.return_value = mock_repo
 
-        payload = _make_issue_payload(action="opened", labels=["sdd-analyze"])
-        resp = self._post_issue_webhook(client, payload)
+            app = create_api_app(
+                bus,
+                settings,
+                db_manager=db_manager,
+                working_directory=Path("/tmp"),
+                notification_chat_ids=[456],
+            )
+            client = TestClient(app)
+
+            payload = _make_issue_payload(action="opened", labels=["sdd-analyze"])
+            resp = self._post_issue_webhook(client, payload)
 
         assert resp.status_code == 200
         assert resp.json()["status"] == "accepted"
 
-        # We expect 3 publish calls: WebhookEvent + AgentResponseEvent + ScheduledEvent
+        # Confirmation flow: WebhookEvent + AgentResponseEvent (with keyboard), NO ScheduledEvent
         published = self._published_types(mock_pub)
         assert "WebhookEvent" in published
-        assert "ScheduledEvent" in published
         assert "AgentResponseEvent" in published
+        assert "ScheduledEvent" not in published
 
     def test_issue_opened_without_label_does_not_trigger_sdd(self) -> None:
         """Issue without required label only publishes WebhookEvent."""
@@ -437,22 +453,41 @@ class TestServerIssueWebhookIntegration:
         published = self._published_types(mock_pub)
         assert "ScheduledEvent" not in published
 
-    def test_labeled_action_triggers_sdd(self) -> None:
-        """Issue labeled with the target label after creation also triggers SDD."""
+    def test_labeled_action_sends_confirmation(self) -> None:
+        """Issue labeled with target label sends confirmation menu, not ScheduledEvent."""
+        from unittest.mock import patch
+
         bus, mock_pub = self._make_bus_with_mock_publish()
         settings = _make_settings(enable_issue_webhook=True)
+        db_manager = MagicMock()
 
-        app = create_api_app(bus, settings, working_directory=Path("/tmp"))
-        client = TestClient(app)
+        with (
+            patch(
+                "src.api.server.try_record_issue_seen",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch("src.api.server.WebhookConfirmationRepository") as mock_repo_cls,
+        ):
+            mock_repo = AsyncMock()
+            mock_repo.insert.return_value = 99
+            mock_repo_cls.return_value = mock_repo
 
-        payload = _make_issue_payload(action="labeled", added_label="sdd-analyze")
-        resp = self._post_issue_webhook(
-            client, payload, delivery_id="delivery-labeled"
-        )
+            app = create_api_app(
+                bus, settings, db_manager=db_manager, working_directory=Path("/tmp"),
+                notification_chat_ids=[456],
+            )
+            client = TestClient(app)
+
+            payload = _make_issue_payload(action="labeled", added_label="sdd-analyze")
+            resp = self._post_issue_webhook(
+                client, payload, delivery_id="delivery-labeled"
+            )
 
         assert resp.status_code == 200
         published = self._published_types(mock_pub)
-        assert "ScheduledEvent" in published
+        assert "AgentResponseEvent" in published
+        assert "ScheduledEvent" not in published
 
     def test_push_event_does_not_trigger_sdd(self) -> None:
         """Non-issues events pass through without triggering SDD."""
@@ -482,15 +517,17 @@ class TestServerIssueWebhookIntegration:
         assert "ScheduledEvent" not in published
 
     def test_no_notification_when_no_chat_ids(self) -> None:
-        """No AgentResponseEvent published when chat IDs are not configured."""
+        """No AgentResponseEvent or ScheduledEvent when no chat IDs configured."""
         bus, mock_pub = self._make_bus_with_mock_publish()
         settings = _make_settings(
             enable_issue_webhook=True, notification_chat_ids=[]
         )
+        db_manager = MagicMock()
 
         app = create_api_app(
             bus,
             settings,
+            db_manager=db_manager,
             working_directory=Path("/tmp"),
             notification_chat_ids=[],
         )
@@ -503,6 +540,6 @@ class TestServerIssueWebhookIntegration:
 
         assert resp.status_code == 200
         published = self._published_types(mock_pub)
-        # ScheduledEvent still published (Claude still runs), but no notification
-        assert "ScheduledEvent" in published
+        # No chat_ids → no confirmation sent, no analysis triggered
+        assert "ScheduledEvent" not in published
         assert "AgentResponseEvent" not in published
