@@ -10,7 +10,7 @@ export function Crons() {
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["crons"],
-    queryFn: () => cronsApi.list().then((r) => r.data),
+    queryFn: () => cronsApi.list().then((r) => r.data.jobs),
     refetchInterval: 30_000,
   });
 

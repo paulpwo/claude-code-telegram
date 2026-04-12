@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 export function Config() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["config"],
-    queryFn: () => configApi.get().then((r) => r.data),
+    queryFn: () => configApi.get().then((r) => r.data?.settings ?? r.data),
     // Static — no polling
     staleTime: Infinity,
     refetchOnWindowFocus: false,

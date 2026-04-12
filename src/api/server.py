@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 import structlog
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse as _FileResponse
 
 from ..config.settings import Settings
 from ..events.bus import EventBus
@@ -88,11 +89,24 @@ def create_api_app(
 
         app.include_router(create_admin_router(), prefix="/api/admin")
         dist_path = Path(__file__).parent.parent / "admin" / "dist"
-        app.mount(
-            "/admin",
-            StaticFiles(directory=str(dist_path), html=True, check_dir=False),
-            name="admin",
-        )
+
+        # Serve built Vite assets (hashed filenames, safe to cache)
+        assets_path = dist_path / "assets"
+        if assets_path.exists():
+            app.mount(
+                "/admin/assets",
+                StaticFiles(directory=str(assets_path)),
+                name="admin-assets",
+            )
+
+        # SPA catch-all: any /admin/* path that isn't an API route serves index.html
+        index_html = dist_path / "index.html"
+
+        @app.get("/admin", include_in_schema=False)
+        @app.get("/admin/{rest_of_path:path}", include_in_schema=False)
+        async def serve_admin_spa(rest_of_path: str = "") -> _FileResponse:  # noqa: RUF029
+            return _FileResponse(str(index_html))
+
         logger.info("Admin dashboard enabled", dist_path=str(dist_path))
     else:
         logger.debug(
