@@ -153,9 +153,15 @@ class MessageOrchestrator:
 
             if should_enforce:
                 if self.settings.project_threads_mode == "private":
-                    should_enforce = not is_sync_bypass and not (
-                        is_start_bypass and message_thread_id is None
+                    is_private_dm = (
+                        getattr(update.effective_chat, "type", "") == "private"
+                        if update.effective_chat
+                        else False
                     )
+                    # Private DMs with no topic thread: never enforce routing.
+                    # /start bypass (no thread) and plain DMs both skip enforcement.
+                    is_plain_private_dm = is_private_dm and message_thread_id is None
+                    should_enforce = not is_sync_bypass and not is_plain_private_dm
                 else:
                     is_private_chat = (
                         getattr(update.effective_chat, "type", "") == "private"

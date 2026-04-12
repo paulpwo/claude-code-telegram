@@ -902,8 +902,13 @@ async def test_private_mode_start_inside_topic_uses_thread_context(
     assert captured["dir"] == project_path
 
 
-async def test_private_mode_rejects_help_outside_topics(private_thread_settings, deps):
-    """Private mode rejects non-allowed commands outside mapped topics."""
+async def test_private_mode_allows_plain_dm_outside_topics(private_thread_settings, deps):
+    """Private mode allows any command in a plain DM (no thread_id).
+
+    Plain DMs are never gated by thread routing — they use the default
+    approved_directory. Only messages inside a private topic thread that
+    maps to a project are subject to routing.
+    """
     orchestrator = MessageOrchestrator(private_thread_settings, deps)
     called = {"value": False}
 
@@ -931,8 +936,9 @@ async def test_private_mode_rejects_help_outside_topics(private_thread_settings,
 
     await wrapped(update, context)
 
-    assert called["value"] is False
-    update.effective_message.reply_text.assert_called_once()
+    # Plain DM must pass through — thread routing only applies inside topic threads.
+    assert called["value"] is True
+    update.effective_message.reply_text.assert_not_called()
 
 
 async def test_known_command_not_forwarded_to_claude(agentic_settings, deps):
