@@ -32,7 +32,13 @@ from telegram.ext import (
 from ..claude.sdk_integration import StreamUpdate
 from ..config.settings import Settings
 from ..projects import PrivateTopicsUnavailableError
-from .session_scope import scope_key, user_data_session_key
+from .session_scope import (
+    DmWorkdirError,
+    ensure_dm_workdir,
+    is_dm,
+    scope_key,
+    user_data_session_key,
+)
 from .utils.draft_streamer import DraftStreamer, generate_draft_id
 from .utils.html_format import escape_html
 from .utils.image_extractor import (
@@ -312,6 +318,45 @@ class MessageOrchestrator:
         if chat and getattr(chat, "is_forum", False):
             return 1
         return None
+
+    async def _ensure_dm_workdir_or_abort(
+        self,
+        update: Update,
+        progress_msg: Any = None,
+    ) -> bool:
+        """Lazily provision ``/workspace/_dm_<user_id>`` for DM scopes.
+
+        Returns ``True`` when the workdir is ready (non-DM scopes are a
+        no-op that still returns ``True``). Returns ``False`` when the
+        mkdir failed — in that case a user-facing error has already been
+        sent via ``progress_msg`` (if provided) or ``update.message`` and
+        the caller MUST abort the turn without inserting a session row.
+        """
+        if not is_dm(update):
+            return True
+        try:
+            ensure_dm_workdir(update)
+            return True
+        except DmWorkdirError as exc:
+            logger.error(
+                "Failed to create DM workspace",
+                error=str(exc),
+                user_id=update.effective_user.id if update.effective_user else None,
+            )
+            error_text = (
+                "❌ Could not create your DM workspace. "
+                "Please contact the admin."
+            )
+            try:
+                if progress_msg is not None:
+                    await progress_msg.edit_text(error_text, reply_markup=None)
+                elif update.message is not None:
+                    await update.message.reply_text(error_text)
+                elif update.callback_query is not None:
+                    await update.callback_query.answer(error_text, show_alert=True)
+            except Exception:
+                logger.debug("Failed to surface DM workdir error to user")
+            return False
 
     async def _reject_for_thread_mode(self, update: Update, message: str) -> None:
         """Send a guidance response when strict thread routing rejects an update."""
@@ -1346,6 +1391,12 @@ class MessageOrchestrator:
         _user_id, chat_id, thread_id = scope_key(update)
         session_id = context.user_data.get(session_key)
 
+        # DM scope: provision /workspace/_dm_<user_id> lazily. Fail loud —
+        # do NOT fall back to a shared workdir.
+        if not await self._ensure_dm_workdir_or_abort(update, progress_msg):
+            self._active_requests.pop(user_id, None)
+            return
+
         # Check if /new was used — skip auto-resume for this first message.
         # Flag is only cleared after a successful run so retries keep the intent.
         force_new = bool(context.user_data.get("force_new_session"))
@@ -1662,6 +1713,10 @@ class MessageOrchestrator:
         _user_id, chat_id, thread_id = scope_key(update)
         session_id = context.user_data.get(session_key)
 
+        # DM scope: provision /workspace/_dm_<user_id> lazily. Fail loud.
+        if not await self._ensure_dm_workdir_or_abort(update, progress_msg):
+            return
+
         # Check if /new was used — skip auto-resume for this first message.
         # Flag is only cleared after a successful run so retries keep the intent.
         force_new = bool(context.user_data.get("force_new_session"))
@@ -1880,6 +1935,10 @@ class MessageOrchestrator:
         _user_id, chat_id, thread_id = scope_key(update)
         session_id = context.user_data.get(session_key)
         force_new = bool(context.user_data.get("force_new_session"))
+
+        # DM scope: provision /workspace/_dm_<user_id> lazily. Fail loud.
+        if not await self._ensure_dm_workdir_or_abort(update, progress_msg):
+            return
 
         verbose_level = self._get_verbose_level(context)
         voice_mode = context.user_data.get("voice_reply", "off")

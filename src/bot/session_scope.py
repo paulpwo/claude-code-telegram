@@ -26,11 +26,23 @@ full rollout plan.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Tuple, Union
 
 from telegram import CallbackQuery, Update
 
 ScopeSource = Union[Update, CallbackQuery]
+
+DM_WORKSPACE_ROOT = Path("/workspace")
+
+
+class DmWorkdirError(RuntimeError):
+    """Raised when the per-user DM working directory cannot be provisioned.
+
+    Callers MUST catch this and surface an explicit error to the user.
+    They MUST NOT silently fall back to a shared working directory —
+    doing so would break scope isolation between users.
+    """
 
 
 def _extract_triple(src: Any) -> Tuple[int, int, int]:
@@ -87,3 +99,42 @@ def is_dm(update: ScopeSource) -> bool:
     """
     user_id, chat_id, thread_id = _extract_triple(update)
     return chat_id == user_id and thread_id == 0
+
+
+def dm_workdir_for(user_id: int, root: Path = DM_WORKSPACE_ROOT) -> Path:
+    """Return the DM working directory path for ``user_id``.
+
+    The convention is ``{root}/_dm_{user_id}`` — ``root`` defaults to
+    ``/workspace`` and is parametrized only so tests can inject a tmp path.
+    """
+    return root / f"_dm_{user_id}"
+
+
+def ensure_dm_workdir(
+    update: ScopeSource, root: Path = DM_WORKSPACE_ROOT
+) -> Path:
+    """Idempotently create ``/workspace/_dm_<user_id>`` for DM scopes.
+
+    Returns the resolved DM directory path. If the update is NOT a DM,
+    raises ``ValueError`` — callers should gate this call with
+    :func:`is_dm`. If the directory cannot be created (``OSError`` /
+    ``PermissionError``), raises :class:`DmWorkdirError` so the handler
+    can reply with an explicit error and abort the turn.
+
+    Never silently falls back to a shared workdir on failure — that
+    would violate per-user isolation.
+    """
+    user_id, _chat_id, _thread_id = _extract_triple(update)
+    if not is_dm(update):
+        raise ValueError(
+            "ensure_dm_workdir called on a non-DM update; gate with is_dm()"
+        )
+
+    path = dm_workdir_for(user_id, root=root)
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise DmWorkdirError(
+            f"Could not create DM workspace {path}: {exc}"
+        ) from exc
+    return path
