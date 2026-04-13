@@ -34,6 +34,7 @@ from ..config.settings import Settings
 from ..projects import PrivateTopicsUnavailableError
 from .session_scope import (
     DmWorkdirError,
+    dm_workdir_for,
     ensure_dm_workdir,
     is_dm,
     scope_key,
@@ -1384,9 +1385,6 @@ class MessageOrchestrator:
             )
             return
 
-        current_dir = context.user_data.get(
-            "current_directory", self.settings.approved_directory
-        )
         session_key = user_data_session_key(update)
         _user_id, chat_id, thread_id = scope_key(update)
         session_id = context.user_data.get(session_key)
@@ -1396,6 +1394,18 @@ class MessageOrchestrator:
         if not await self._ensure_dm_workdir_or_abort(update, progress_msg):
             self._active_requests.pop(user_id, None)
             return
+
+        # Bind the Claude working directory to the DM per-user workdir when
+        # the scope is a DM — otherwise Claude would run at the shared
+        # approved_directory root and cross-user isolation would be broken.
+        # Forum topics / group chats keep the usual resolution.
+        if is_dm(update):
+            current_dir = dm_workdir_for(update.effective_user.id)
+            context.user_data["current_directory"] = current_dir
+        else:
+            current_dir = context.user_data.get(
+                "current_directory", self.settings.approved_directory
+            )
 
         # Check if /new was used — skip auto-resume for this first message.
         # Flag is only cleared after a successful run so retries keep the intent.
@@ -1706,9 +1716,6 @@ class MessageOrchestrator:
             )
             return
 
-        current_dir = context.user_data.get(
-            "current_directory", self.settings.approved_directory
-        )
         session_key = user_data_session_key(update)
         _user_id, chat_id, thread_id = scope_key(update)
         session_id = context.user_data.get(session_key)
@@ -1716,6 +1723,16 @@ class MessageOrchestrator:
         # DM scope: provision /workspace/_dm_<user_id> lazily. Fail loud.
         if not await self._ensure_dm_workdir_or_abort(update, progress_msg):
             return
+
+        # Bind working directory to the per-user DM workdir in DM scope; see
+        # agentic_text for the rationale.
+        if is_dm(update):
+            current_dir = dm_workdir_for(update.effective_user.id)
+            context.user_data["current_directory"] = current_dir
+        else:
+            current_dir = context.user_data.get(
+                "current_directory", self.settings.approved_directory
+            )
 
         # Check if /new was used — skip auto-resume for this first message.
         # Flag is only cleared after a successful run so retries keep the intent.
@@ -1928,9 +1945,6 @@ class MessageOrchestrator:
             )
             return
 
-        current_dir = context.user_data.get(
-            "current_directory", self.settings.approved_directory
-        )
         session_key = user_data_session_key(update)
         _user_id, chat_id, thread_id = scope_key(update)
         session_id = context.user_data.get(session_key)
@@ -1939,6 +1953,16 @@ class MessageOrchestrator:
         # DM scope: provision /workspace/_dm_<user_id> lazily. Fail loud.
         if not await self._ensure_dm_workdir_or_abort(update, progress_msg):
             return
+
+        # Bind working directory to the per-user DM workdir in DM scope; see
+        # agentic_text for the rationale.
+        if is_dm(update):
+            current_dir = dm_workdir_for(update.effective_user.id)
+            context.user_data["current_directory"] = current_dir
+        else:
+            current_dir = context.user_data.get(
+                "current_directory", self.settings.approved_directory
+            )
 
         verbose_level = self._get_verbose_level(context)
         voice_mode = context.user_data.get("voice_reply", "off")
