@@ -16,6 +16,7 @@ from ...projects import PrivateTopicsUnavailableError, load_project_registry
 from ...security.audit import AuditLogger
 from ...security.validators import SecurityValidator
 from ...storage.models import SessionModel
+from ..session_scope import scope_key, user_data_session_key
 from ..utils.html_format import escape_html
 
 logger = structlog.get_logger()
@@ -308,10 +309,11 @@ async def new_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     relative_path = current_dir.relative_to(settings.approved_directory)
 
     # Track what was cleared for user feedback
-    old_session_id = context.user_data.get("claude_session_id")
+    session_key = user_data_session_key(update)
+    old_session_id = context.user_data.get(session_key)
 
     # Clear existing session data - this is the explicit way to reset context
-    context.user_data["claude_session_id"] = None
+    context.user_data[session_key] = None
     context.user_data["session_started"] = True
     context.user_data["force_new_session"] = True
 
@@ -374,7 +376,9 @@ async def continue_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             return
 
         # Check if there's an existing session in user context
-        claude_session_id = context.user_data.get("claude_session_id")
+        session_key = user_data_session_key(update)
+        _user_id, chat_id, thread_id = scope_key(update)
+        claude_session_id = context.user_data.get(session_key)
 
         if claude_session_id:
             # We have a session in context, continue it directly
@@ -393,6 +397,8 @@ async def continue_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 working_directory=current_dir,
                 user_id=user_id,
                 session_id=claude_session_id,
+                chat_id=chat_id,
+                thread_id=thread_id,
             )
         else:
             # No session in context, try to find the most recent session
@@ -407,11 +413,13 @@ async def continue_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 user_id=user_id,
                 working_directory=current_dir,
                 prompt=prompt or default_prompt,
+                chat_id=chat_id,
+                thread_id=thread_id,
             )
 
         if claude_response:
             # Update session ID in context
-            context.user_data["claude_session_id"] = claude_response.session_id
+            context.user_data[session_key] = claude_response.session_id
 
             # Delete status message and send response
             await status_msg.delete()
@@ -689,14 +697,16 @@ async def change_directory(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 user_id, resolved_path
             )
             if existing_session:
-                context.user_data["claude_session_id"] = existing_session.session_id
+                context.user_data[user_data_session_key(update)] = (
+                    existing_session.session_id
+                )
                 resumed_session_info = (
                     f"\n🔄 Resumed session <code>{existing_session.session_id[:8]}...</code> "
                     f"({existing_session.message_count} messages)"
                 )
             else:
                 # No session for this directory - clear the current one
-                context.user_data["claude_session_id"] = None
+                context.user_data[user_data_session_key(update)] = None
                 resumed_session_info = (
                     "\n🆕 No existing session. Send a message to start a new one."
                 )
@@ -859,7 +869,7 @@ async def session_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     settings: Settings = context.bot_data["settings"]
 
     # Get session info
-    claude_session_id = context.user_data.get("claude_session_id")
+    claude_session_id = context.user_data.get(user_data_session_key(update))
     current_dir = context.user_data.get(
         "current_directory", settings.approved_directory
     )
@@ -967,7 +977,7 @@ async def export_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     # Get current session
-    claude_session_id = context.user_data.get("claude_session_id")
+    claude_session_id = context.user_data.get(user_data_session_key(update))
 
     if not claude_session_id:
         await update.message.reply_text(
@@ -1008,7 +1018,8 @@ async def end_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     settings: Settings = context.bot_data["settings"]
 
     # Check if there's an active session
-    claude_session_id = context.user_data.get("claude_session_id")
+    session_key = user_data_session_key(update)
+    claude_session_id = context.user_data.get(session_key)
 
     if not claude_session_id:
         await update.message.reply_text(
@@ -1028,7 +1039,7 @@ async def end_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     relative_path = current_dir.relative_to(settings.approved_directory)
 
     # Clear session data
-    context.user_data["claude_session_id"] = None
+    context.user_data[session_key] = None
     context.user_data["session_started"] = False
     context.user_data["last_message"] = None
 
