@@ -230,8 +230,8 @@ class Settings(BaseSettings):
     # Features
     enable_mcp: bool = Field(False, description="Enable Model Context Protocol")
     mcp_config_path: Optional[Path] = Field(
-        Path("config/mcp.json"),
-        description="MCP configuration file path (default: config/mcp.json)",
+        Path("config/mcp.example.json"),
+        description="MCP configuration file path (default: config/mcp.example.json)",
     )
     enable_git_integration: bool = Field(True, description="Enable git commands")
     enable_file_uploads: bool = Field(True, description="Enable file upload handling")

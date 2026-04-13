@@ -150,6 +150,7 @@ models/*
 sessions/
 backups/
 uploads/
+config/mcp.json
 
 repos/*
 !repos/.gitkeep
