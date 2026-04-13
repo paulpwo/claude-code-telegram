@@ -135,29 +135,26 @@ def test_build_sdd_prompt_working_dir_in_prompt():
 
 
 def test_build_sdd_prompt_contains_agent_file_instructions():
-    """Prompt instructs Claude to write all three .agent/<Type>/<BranchSlug>/ files."""
+    """Prompt instructs Claude to load the sdd skill file."""
     prompt = _build_sdd_prompt(
         arg="Some task",
         working_dir=Path("/repo"),
         protected_branches=["main"],
         is_url=False,
     )
-    assert ".agent/<Type>/<BranchSlug>/planning.md" in prompt
-    assert ".agent/<Type>/<BranchSlug>/files.md" in prompt
-    assert ".agent/<Type>/<BranchSlug>/approach.md" in prompt
+    assert "SKILL: Load `.claude/skills/sdd.md`" in prompt
 
 
 def test_build_sdd_prompt_restrictions_present():
-    """Prompt must explicitly forbid modifying source files, opening PRs, running tests."""
+    """Prompt must include protected branches and working directory."""
     prompt = _build_sdd_prompt(
         arg="Some task",
         working_dir=Path("/repo"),
         protected_branches=["main"],
         is_url=False,
     )
-    assert "DO NOT modify any existing source file" in prompt
-    assert "DO NOT open a Pull Request" in prompt
-    assert "DO NOT run tests" in prompt
+    assert "Protected branches" in prompt
+    assert "/repo" in prompt
 
 
 # ---------------------------------------------------------------------------

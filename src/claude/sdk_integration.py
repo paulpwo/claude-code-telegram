@@ -12,9 +12,7 @@ from typing import Any, AsyncIterator, Callable, Dict, List, Optional
 # using the conversation's working directory (e.g. /workspace/_dm_xxx) as cwd,
 # not the application root (/app). A relative path like "src/mcp/telegram_server.py"
 # would fail to resolve in any user workspace.
-_TELEGRAM_SERVER_PATH = str(
-    Path(__file__).parent.parent / "mcp" / "telegram_server.py"
-)
+_TELEGRAM_SERVER_PATH = str(Path(__file__).parent.parent / "mcp" / "telegram_server.py")
 
 import structlog
 from claude_agent_sdk import (
