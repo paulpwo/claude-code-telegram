@@ -108,60 +108,13 @@ def _build_sdd_prompt(
     else:
         issue_block = f"Issue / task description:\n{arg}"
 
-    prompt = f"""You are running a SDD pre-analysis on the repo at {working_dir}.
+    return f"""SKILL: Load `.claude/skills/sdd.md` before starting.
 
-Protected branches (NEVER push to these): {protected_str}
+Working directory: {working_dir}
+Protected branches (never push to these): {protected_str}
 
 {issue_block}
-
-Instructions:
-1. If a GitHub URL was provided, run: gh issue view {arg if is_url else '<url>'} to fetch the issue title and body.
-
-2. Infer branch type from the issue/description content:
-   - Bug report, crash, error, regression → Fix  → base branch: main
-   - New feature, enhancement, improvement → Feat → base branch: develop
-   - Refactoring, cleanup               → Refactor → base branch: develop
-   - Documentation                      → Docs     → base branch: develop
-   - Everything else                    → Chore    → base branch: develop
-   If the repo does not have a "develop" branch, use "main" as the base for everything.
-
-3. Determine the base branch:
-   Run: git branch -r
-   Use the branching rule above. If the required base branch does not exist remotely, fall back to main.
-
-4. Create a new branch from the correct base:
-   Run: git fetch origin
-   Run: git checkout -b <branch-name> origin/<base-branch>
-   Branch naming:
-   - Numbered issues: {{Type}}/Issue{{N}}{{DescriptionInPascalCase}}  (e.g. Feat/Issue5AddDarkMode)
-   - Free-text input: {{Type}}/{{DescriptionInPascalCase}}            (e.g. Fix/LoginCrashOnExpiredToken)
-
-5. Explore the repo structure — focus on directories relevant to the issue.
-
-6. Determine the output directory for this analysis using the branch name from step 4.
-   The branch name (e.g. "Feat/Issue5AddDarkMode") maps directly to a subdirectory:
-   - Branch "Feat/Issue5AddDarkMode"   → .agent/Feat/Issue5AddDarkMode/
-   - Branch "Fix/LoginCrashOnExpiredToken" → .agent/Fix/LoginCrashOnExpiredToken/
-   Use this directory for ALL files in steps 7-9. Never write to a generic .agent/planning/ or .agent/context/.
-
-7. Write .agent/<Type>/<BranchSlug>/planning.md — what to implement, acceptance criteria.
-8. Write .agent/<Type>/<BranchSlug>/files.md — relevant files and their role.
-9. Write .agent/<Type>/<BranchSlug>/approach.md — suggested approach, alternatives, tradeoffs.
-10. Run: git add .agent/ && git commit -m "📝 docs(analysis): agregar pre-análisis {arg[:60] if not is_url else 'issue #' + str(_extract_issue_number(arg) or '?')}"
-11. Run: git push origin <branch-name>
-12. RESTRICTIONS:
-    - DO NOT modify any existing source file outside .agent/
-    - DO NOT open a Pull Request
-    - DO NOT run tests or builds
-    - DO NOT push to any protected branch ({protected_str})
-
-End with a brief summary containing:
-- Branch name created and base branch used
-- Directory created under .agent/ (full path)
-- Files written
-- One-line problem statement
 """
-    return prompt
 
 
 async def sdd_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
