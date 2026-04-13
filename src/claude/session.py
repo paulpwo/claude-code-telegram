@@ -38,6 +38,10 @@ class ClaudeSession:
     message_count: int = 0
     tools_used: List[str] = field(default_factory=list)
     is_new_session: bool = False  # True if session hasn't been sent to Claude Code yet
+    # Scope triple for per-(user,chat,thread) isolation. ``chat_id`` is None for
+    # legacy pre-v8 sessions; ``thread_id`` defaults to 0 (non-forum contexts).
+    chat_id: Optional[int] = None
+    thread_id: int = 0
 
     def is_expired(self, timeout_hours: int) -> bool:
         """Check if session has expired."""
@@ -128,13 +132,22 @@ class SessionManager:
         user_id: int,
         project_path: Path,
         session_id: Optional[str] = None,
+        chat_id: Optional[int] = None,
+        thread_id: int = 0,
     ) -> ClaudeSession:
-        """Get existing session or create new one."""
+        """Get existing session or create new one.
+
+        ``chat_id`` / ``thread_id`` are persisted on the session for scope-aware
+        recovery after restart. They do NOT change session identity (which is
+        still the globally-unique ``session_id`` assigned by Claude).
+        """
         logger.info(
             "Getting or creating session",
             user_id=user_id,
             project_path=str(project_path),
             session_id=session_id,
+            chat_id=chat_id,
+            thread_id=thread_id,
         )
 
         # Check for existing session
@@ -149,6 +162,10 @@ class SessionManager:
                 )
             elif not session.is_expired(self.config.session_timeout_hours):
                 logger.debug("Using active session", session_id=session_id)
+                # Backfill scope if caller provided it and it's missing
+                if chat_id is not None and session.chat_id is None:
+                    session.chat_id = chat_id
+                    session.thread_id = thread_id
                 return session
 
         # Try to load from storage (filtered by user_id)
@@ -157,6 +174,9 @@ class SessionManager:
             if session and not session.is_expired(self.config.session_timeout_hours):
                 self.active_sessions[session_id] = session
                 logger.info("Loaded session from storage", session_id=session_id)
+                if chat_id is not None and session.chat_id is None:
+                    session.chat_id = chat_id
+                    session.thread_id = thread_id
                 return session
 
         # Check user session limit
@@ -179,6 +199,8 @@ class SessionManager:
             created_at=datetime.now(UTC),
             last_used=datetime.now(UTC),
             is_new_session=True,
+            chat_id=chat_id,
+            thread_id=thread_id,
         )
 
         # Don't save to storage yet — deferred until after Claude responds
