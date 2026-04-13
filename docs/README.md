@@ -17,6 +17,7 @@ Quick links to every doc in this project. Start with the [README](../README.md) 
 | Document | Description |
 |----------|-------------|
 | [Project Overview](project-overview.md) | Architecture, core objectives, request flow diagrams, and design decisions |
+| [Session Scoping](session-scoping.md) | `(user_id, chat_id, thread_id)` session identity, DM workdir convention, and migration v8 |
 | [SDK Duplication Review](SDK_DUPLICATION_REVIEW.md) | Audit of `src/claude/` against the Claude Agent SDK — what to simplify or remove |
 
 ## Repository-Level
