@@ -386,6 +386,37 @@ class DatabaseManager:
                     ON approved_users(user_id);
                 """,
             ),
+            (
+                8,
+                """
+                -- Scope Claude sessions by (user_id, chat_id, thread_id).
+                --
+                -- Session identity used to be user-only via
+                -- context.user_data["claude_session_id"], which leaked
+                -- sessions between DM / groups / forum topics. These columns
+                -- let storage persist the full scope for recovery, and the
+                -- index covers the by-scope lookup.
+                --
+                -- ALTER TABLE ... ADD COLUMN is NOT idempotent in SQLite,
+                -- but the migration runner is gated by schema_version so v8
+                -- executes exactly once. v8 is forward-only; a future v9
+                -- would be required to roll back the columns/index.
+                --
+                -- Legacy rows (pre-v8, chat_id IS NULL) can't be mapped to a
+                -- scope after the fact, so they're marked inactive here to
+                -- avoid surfacing a cross-scope session to the user.
+                ALTER TABLE sessions ADD COLUMN chat_id INTEGER;
+                ALTER TABLE sessions ADD COLUMN thread_id INTEGER NOT NULL DEFAULT 0;
+
+                CREATE INDEX IF NOT EXISTS idx_sessions_scope
+                    ON sessions(user_id, chat_id, thread_id);
+
+                UPDATE sessions
+                   SET is_active = FALSE
+                 WHERE chat_id IS NULL
+                   AND is_active = TRUE;
+                """,
+            ),
         ]
 
     async def _init_pool(self):
