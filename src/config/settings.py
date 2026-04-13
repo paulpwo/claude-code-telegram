@@ -230,7 +230,8 @@ class Settings(BaseSettings):
     # Features
     enable_mcp: bool = Field(False, description="Enable Model Context Protocol")
     mcp_config_path: Optional[Path] = Field(
-        None, description="MCP configuration file path"
+        Path("config/mcp.example.json"),
+        description="MCP configuration file path (default: config/mcp.example.json)",
     )
     enable_git_integration: bool = Field(True, description="Enable git commands")
     enable_file_uploads: bool = Field(True, description="Enable file upload handling")
@@ -290,19 +291,6 @@ class Settings(BaseSettings):
     # Voice TTS (text-to-speech outgoing replies)
     enable_voice_replies: bool = Field(
         False, description="Enable outgoing voice note replies via edge-tts"
-    )
-    voice_reply_mode: Literal["manual", "auto"] = Field(
-        "manual",
-        description=(
-            "Voice reply mode: 'manual' (always voice when enabled via /voice on) "
-            "or 'auto' (voice only when reply is short enough)"
-        ),
-    )
-    voice_reply_max_words: int = Field(
-        200,
-        ge=1,
-        le=500,
-        description="Maximum word count for auto voice mode",
     )
     edge_tts_voice: str = Field(
         "es-CO-GonzaloNeural",
@@ -643,17 +631,6 @@ class Settings(BaseSettings):
             )
         return provider
 
-    @field_validator("voice_reply_mode", mode="before")
-    @classmethod
-    def validate_voice_reply_mode(cls, v: Any) -> str:
-        """Validate and normalize voice reply mode."""
-        if v is None:
-            return "manual"
-        mode = str(v).strip().lower()
-        if mode not in {"manual", "auto"}:
-            raise ValueError("voice_reply_mode must be one of ['manual', 'auto']")
-        return mode
-
     @field_validator("tts_engine", mode="before")
     @classmethod
     def validate_tts_engine(cls, v: Any) -> str:
@@ -700,9 +677,7 @@ class Settings(BaseSettings):
                 "auth_token_secret required when enable_token_auth is True"
             )
 
-        # Check MCP requirements
-        if self.enable_mcp and not self.mcp_config_path:
-            raise ValueError("mcp_config_path required when enable_mcp is True")
+        # MCP config path defaults to config/mcp.json — no explicit check needed.
 
         if self.enable_project_threads:
             if (

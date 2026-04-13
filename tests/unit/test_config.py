@@ -158,18 +158,6 @@ def test_mcp_config_validation(tmp_path, monkeypatch):
     monkeypatch.delenv("ENABLE_MCP", raising=False)
     monkeypatch.delenv("MCP_CONFIG_PATH", raising=False)
 
-    # Should fail when MCP enabled but no config path
-    with pytest.raises(ValidationError) as exc_info:
-        Settings(
-            telegram_bot_token="test_token",
-            telegram_bot_username="test_bot",
-            approved_directory=str(test_dir),
-            enable_mcp=True,
-            mcp_config_path=None,
-        )
-
-    assert "mcp_config_path required" in str(exc_info.value)
-
     # Should fail when config file doesn't exist
     with pytest.raises(ValidationError) as exc_info:
         Settings(

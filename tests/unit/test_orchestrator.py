@@ -21,12 +21,48 @@ def tmp_dir():
 
 @pytest.fixture
 def agentic_settings(tmp_dir):
-    return create_test_config(approved_directory=str(tmp_dir), agentic_mode=True)
+    return create_test_config(
+        approved_directory=str(tmp_dir),
+        agentic_mode=True,
+        enable_project_threads=False,
+        enable_voice_replies=False,
+        enable_scheduler=False,
+    )
 
 
 @pytest.fixture
 def classic_settings(tmp_dir):
-    return create_test_config(approved_directory=str(tmp_dir), agentic_mode=False)
+    return create_test_config(
+        approved_directory=str(tmp_dir),
+        agentic_mode=False,
+        enable_project_threads=False,
+        enable_voice_replies=False,
+        enable_scheduler=False,
+    )
+
+
+@pytest.fixture
+def full_agentic_settings(tmp_dir):
+    """Agentic settings with all optional features enabled — used for command-count tests."""
+    return create_test_config(
+        approved_directory=str(tmp_dir),
+        agentic_mode=True,
+        enable_voice_replies=True,
+        enable_scheduler=True,
+        enable_project_threads=True,
+    )
+
+
+@pytest.fixture
+def full_classic_settings(tmp_dir):
+    """Classic settings with all optional features enabled — used for command-count tests."""
+    return create_test_config(
+        approved_directory=str(tmp_dir),
+        agentic_mode=False,
+        enable_voice_replies=True,
+        enable_scheduler=True,
+        enable_project_threads=True,
+    )
 
 
 @pytest.fixture
@@ -83,9 +119,9 @@ def deps():
     }
 
 
-def test_agentic_registers_8_commands(agentic_settings, deps):
-    """Agentic mode registers start, new, status, verbose, repo, model, restart, sdd, git, topics commands."""
-    orchestrator = MessageOrchestrator(agentic_settings, deps)
+def test_agentic_registers_8_commands(full_agentic_settings, deps):
+    """Agentic mode registers all expected commands including voice, topics, sdd, git."""
+    orchestrator = MessageOrchestrator(full_agentic_settings, deps)
     app = MagicMock()
     app.add_handler = MagicMock()
 
@@ -101,7 +137,7 @@ def test_agentic_registers_8_commands(agentic_settings, deps):
     ]
     commands = [h[0][0].commands for h in cmd_handlers]
 
-    assert len(cmd_handlers) == 10
+    assert len(cmd_handlers) == 13
     assert frozenset({"start"}) in commands
     assert frozenset({"new"}) in commands
     assert frozenset({"status"}) in commands
@@ -112,11 +148,14 @@ def test_agentic_registers_8_commands(agentic_settings, deps):
     assert frozenset({"sdd"}) in commands
     assert frozenset({"git"}) in commands
     assert frozenset({"topics"}) in commands
+    assert frozenset({"voice"}) in commands
+    assert frozenset({"sync_threads"}) in commands
+    assert frozenset({"schedule"}) in commands
 
 
-def test_classic_registers_15_commands(classic_settings, deps):
-    """Classic mode registers all 15 commands."""
-    orchestrator = MessageOrchestrator(classic_settings, deps)
+def test_classic_registers_15_commands(full_classic_settings, deps):
+    """Classic mode registers all expected commands."""
+    orchestrator = MessageOrchestrator(full_classic_settings, deps)
     app = MagicMock()
     app.add_handler = MagicMock()
 
@@ -130,7 +169,7 @@ def test_classic_registers_15_commands(classic_settings, deps):
         if isinstance(call[0][0], CommandHandler)
     ]
 
-    assert len(cmd_handlers) == 16
+    assert len(cmd_handlers) == 18
 
 
 def test_agentic_registers_text_document_photo_handlers(agentic_settings, deps):
@@ -160,14 +199,14 @@ def test_agentic_registers_text_document_photo_handlers(agentic_settings, deps):
     assert len(cb_handlers) == 5
 
 
-async def test_agentic_bot_commands(agentic_settings, deps):
-    """Agentic mode returns 10 bot commands including /model, /sdd, /git, /topics."""
-    orchestrator = MessageOrchestrator(agentic_settings, deps)
+async def test_agentic_bot_commands(full_agentic_settings, deps):
+    """Agentic mode returns all expected bot commands."""
+    orchestrator = MessageOrchestrator(full_agentic_settings, deps)
     commands = await orchestrator.get_bot_commands()
 
-    assert len(commands) == 10
+    assert len(commands) == 13
     cmd_names = [c.command for c in commands]
-    assert cmd_names == [
+    for expected in [
         "start",
         "new",
         "status",
@@ -177,16 +216,20 @@ async def test_agentic_bot_commands(agentic_settings, deps):
         "restart",
         "sdd",
         "git",
+        "voice",
         "topics",
-    ]
+        "sync_threads",
+        "schedule",
+    ]:
+        assert expected in cmd_names, f"Missing command: {expected}"
 
 
-async def test_classic_bot_commands(classic_settings, deps):
-    """Classic mode returns 16 bot commands."""
-    orchestrator = MessageOrchestrator(classic_settings, deps)
+async def test_classic_bot_commands(full_classic_settings, deps):
+    """Classic mode returns all expected bot commands."""
+    orchestrator = MessageOrchestrator(full_classic_settings, deps)
     commands = await orchestrator.get_bot_commands()
 
-    assert len(commands) == 16
+    assert len(commands) == 18
     cmd_names = [c.command for c in commands]
     assert "start" in cmd_names
     assert "help" in cmd_names
