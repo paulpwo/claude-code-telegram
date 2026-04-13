@@ -111,3 +111,20 @@ exposes:
 All handlers and the Claude facade go through this module. If you add a new
 handler that touches sessions, use these helpers — do not recompute the
 triple inline.
+
+## Working directory resolution per chat type
+
+| Chat type                 | Working directory                          |
+|---------------------------|--------------------------------------------|
+| Direct message (DM)       | `/workspace/_dm_<user_id>` (auto-created)  |
+| Group without forum topics| `settings.approved_directory` (shared)     |
+| Forum topic with project  | Project's `absolute_path` from `projects`  |
+
+Each of the three scopes gets its own Claude session — sessions never
+cross chat-type boundaries because the scope key triple `(user_id, chat_id,
+thread_id)` differs.
+
+Note: classic-mode handlers (when `AGENTIC_MODE=false`) do NOT wire DM workdir
+provisioning today. Production runs in agentic mode. If classic mode is ever
+re-enabled, DM isolation should be revisited.
+
