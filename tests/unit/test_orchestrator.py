@@ -287,8 +287,15 @@ async def test_agentic_status_compact(agentic_settings, deps):
     assert "Session: none" in text
 
 
-async def test_agentic_text_calls_claude(agentic_settings, deps):
+async def test_agentic_text_calls_claude(agentic_settings, deps, monkeypatch):
     """Agentic text handler calls Claude and returns response without keyboard."""
+    # DM scope triggers /workspace/_dm_<user_id> provisioning. The test
+    # host does not have a writable /workspace; stub the mkdir out so
+    # the assertion here focuses on Claude invocation, not filesystem IO.
+    monkeypatch.setattr(
+        "src.bot.orchestrator.ensure_dm_workdir",
+        lambda update: Path("/tmp"),
+    )
     orchestrator = MessageOrchestrator(agentic_settings, deps)
 
     # Mock Claude response
@@ -390,8 +397,13 @@ async def test_agentic_document_rejects_large_files(agentic_settings, deps):
     assert "too large" in call_args.args[0].lower()
 
 
-async def test_agentic_voice_calls_claude(agentic_settings, deps):
+async def test_agentic_voice_calls_claude(agentic_settings, deps, monkeypatch):
     """Agentic voice handler transcribes and routes prompt to Claude."""
+    # DM scope — stub DM workdir provisioning (see test_agentic_text_calls_claude).
+    monkeypatch.setattr(
+        "src.bot.orchestrator.ensure_dm_workdir",
+        lambda update: Path("/tmp"),
+    )
     orchestrator = MessageOrchestrator(agentic_settings, deps)
 
     mock_response = MagicMock()
