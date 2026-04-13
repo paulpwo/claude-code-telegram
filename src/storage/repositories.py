@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional
 import aiosqlite
 import structlog
 
+from src.security.secret_scrubber import scrub_secrets
+
 from .database import DatabaseManager
 from .models import (
     AuditLogModel,
@@ -533,11 +535,11 @@ class MessageRepository:
                     message.session_id,
                     message.user_id,
                     message.timestamp,
-                    message.prompt,
-                    message.response,
+                    scrub_secrets(message.prompt),
+                    scrub_secrets(message.response),
                     message.cost,
                     message.duration_ms,
-                    message.error,
+                    scrub_secrets(message.error),
                 ),
             )
             await conn.commit()
