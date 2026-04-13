@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.bot.orchestrator import MessageOrchestrator, _redact_secrets
+from src.bot.session_scope import user_data_session_key
 from src.config import create_test_config
 
 
@@ -248,18 +249,22 @@ async def test_agentic_start_no_keyboard(agentic_settings, deps):
 
 
 async def test_agentic_new_resets_session(agentic_settings, deps):
-    """Agentic /new clears session and sends brief confirmation."""
+    """Agentic /new clears the scope-specific session and sends brief confirmation."""
     orchestrator = MessageOrchestrator(agentic_settings, deps)
 
     update = MagicMock()
+    update.effective_user.id = 123
+    update.effective_chat.id = 456
+    update.effective_message.message_thread_id = None
     update.message.reply_text = AsyncMock()
 
+    scoped_key = user_data_session_key(update)
     context = MagicMock()
-    context.user_data = {"claude_session_id": "old-session-123"}
+    context.user_data = {scoped_key: "old-session-123"}
 
     await orchestrator.agentic_new(update, context)
 
-    assert context.user_data["claude_session_id"] is None
+    assert context.user_data[scoped_key] is None
     update.message.reply_text.assert_called_once_with("Session reset. What's next?")
 
 
@@ -297,6 +302,8 @@ async def test_agentic_text_calls_claude(agentic_settings, deps):
 
     update = MagicMock()
     update.effective_user.id = 123
+    update.effective_chat.id = 123
+    update.effective_message.message_thread_id = None
     update.message.text = "Help me with this code"
     update.message.message_id = 1
     update.message.chat.send_action = AsyncMock()
@@ -322,8 +329,8 @@ async def test_agentic_text_calls_claude(agentic_settings, deps):
     # Claude was called
     claude_integration.run_command.assert_called_once()
 
-    # Session ID updated
-    assert context.user_data["claude_session_id"] == "session-abc"
+    # Session ID updated under the scope-specific key
+    assert context.user_data[user_data_session_key(update)] == "session-abc"
 
     # Progress message deleted
     progress_msg.delete.assert_called_once()
@@ -406,6 +413,8 @@ async def test_agentic_voice_calls_claude(agentic_settings, deps):
 
     update = MagicMock()
     update.effective_user.id = 123
+    update.effective_chat.id = 123
+    update.effective_message.message_thread_id = None
     update.message.voice = MagicMock()
     update.message.caption = "please summarize"
     update.message.message_id = 1
@@ -431,7 +440,9 @@ async def test_agentic_voice_calls_claude(agentic_settings, deps):
         update.message.voice, "please summarize"
     )
     claude_integration.run_command.assert_awaited_once()
-    assert context.user_data["claude_session_id"] == "voice-session-123"
+    assert (
+        context.user_data[user_data_session_key(update)] == "voice-session-123"
+    )
 
 
 async def test_agentic_voice_missing_handler_is_provider_aware(tmp_path, deps):
@@ -778,12 +789,14 @@ async def test_thread_mode_loads_and_persists_thread_state(group_thread_settings
     deps["project_threads_manager"] = project_threads_manager
 
     async def dummy_handler(update, context):
-        assert context.user_data["claude_session_id"] == "old-session"
-        context.user_data["claude_session_id"] = "new-session"
+        scoped = user_data_session_key(update)
+        assert context.user_data[scoped] == "old-session"
+        context.user_data[scoped] = "new-session"
 
     wrapped = orchestrator._inject_deps(dummy_handler)
 
     update = MagicMock()
+    update.effective_user.id = 999
     update.effective_chat.id = -1001234567890
     update.effective_message.message_thread_id = 777
     update.effective_message.reply_text = AsyncMock()
