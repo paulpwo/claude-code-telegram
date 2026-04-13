@@ -19,6 +19,7 @@ from ...config.settings import Settings
 from ...security.audit import AuditLogger
 from ...security.rate_limiter import RateLimiter
 from ...security.validators import SecurityValidator
+from ..session_scope import scope_key, user_data_session_key
 from ..utils.html_format import escape_html
 from ..utils.image_extractor import (
     ImageAttachment,
@@ -348,8 +349,10 @@ async def handle_text_message(
             "current_directory", settings.approved_directory
         )
 
-        # Get existing session ID
-        session_id = context.user_data.get("claude_session_id")
+        # Get existing session ID (scoped per (user, chat, thread))
+        session_key = user_data_session_key(update)
+        _user_id, chat_id, thread_id = scope_key(update)
+        session_id = context.user_data.get(session_key)
 
         # Check if /new was used — skip auto-resume for this first message.
         # Flag is only cleared after a successful run so retries keep the intent.
@@ -395,6 +398,8 @@ async def handle_text_message(
                 force_new=force_new,
                 model_override=context.user_data.get("model_override"),
                 effort_override=context.user_data.get("effort_override"),
+                chat_id=chat_id,
+                thread_id=thread_id,
             )
 
             # New session created successfully — clear the one-shot flag
@@ -402,7 +407,7 @@ async def handle_text_message(
                 context.user_data["force_new_session"] = False
 
             # Update session ID
-            context.user_data["claude_session_id"] = claude_response.session_id
+            context.user_data[session_key] = claude_response.session_id
 
             # Check if Claude changed the working directory and update our tracking
             _update_working_directory_from_claude_response(
@@ -811,7 +816,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         current_dir = context.user_data.get(
             "current_directory", settings.approved_directory
         )
-        session_id = context.user_data.get("claude_session_id")
+        session_key = user_data_session_key(update)
+        _user_id, chat_id, thread_id = scope_key(update)
+        session_id = context.user_data.get(session_key)
 
         # Process with Claude
         try:
@@ -822,10 +829,12 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 session_id=session_id,
                 model_override=context.user_data.get("model_override"),
                 effort_override=context.user_data.get("effort_override"),
+                chat_id=chat_id,
+                thread_id=thread_id,
             )
 
             # Update session ID
-            context.user_data["claude_session_id"] = claude_response.session_id
+            context.user_data[session_key] = claude_response.session_id
 
             # Check if Claude changed the working directory and update our tracking
             _update_working_directory_from_claude_response(
@@ -940,7 +949,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             current_dir = context.user_data.get(
                 "current_directory", settings.approved_directory
             )
-            session_id = context.user_data.get("claude_session_id")
+            session_key = user_data_session_key(update)
+            _user_id, chat_id, thread_id = scope_key(update)
+            session_id = context.user_data.get(session_key)
 
             # Process with Claude
             try:
@@ -951,10 +962,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     session_id=session_id,
                     model_override=context.user_data.get("model_override"),
                     effort_override=context.user_data.get("effort_override"),
+                    chat_id=chat_id,
+                    thread_id=thread_id,
                 )
 
                 # Update session ID
-                context.user_data["claude_session_id"] = claude_response.session_id
+                context.user_data[session_key] = claude_response.session_id
 
                 # Format and send response
                 from ..utils.formatting import ResponseFormatter
@@ -1069,7 +1082,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         current_dir = context.user_data.get(
             "current_directory", settings.approved_directory
         )
-        session_id = context.user_data.get("claude_session_id")
+        session_key = user_data_session_key(update)
+        _user_id, chat_id, thread_id = scope_key(update)
+        session_id = context.user_data.get(session_key)
 
         try:
             # Keep classic mode aligned with handle_photo: single progress message,
@@ -1081,9 +1096,11 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 session_id=session_id,
                 model_override=context.user_data.get("model_override"),
                 effort_override=context.user_data.get("effort_override"),
+                chat_id=chat_id,
+                thread_id=thread_id,
             )
 
-            context.user_data["claude_session_id"] = claude_response.session_id
+            context.user_data[session_key] = claude_response.session_id
 
             _update_working_directory_from_claude_response(
                 claude_response, context, settings, user_id
