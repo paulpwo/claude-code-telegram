@@ -32,6 +32,14 @@ from telegram.ext import (
 from ..claude.sdk_integration import StreamUpdate
 from ..config.settings import Settings
 from ..projects import PrivateTopicsUnavailableError
+from .session_scope import (
+    DmWorkdirError,
+    dm_workdir_for,
+    ensure_dm_workdir,
+    is_dm,
+    scope_key,
+    user_data_session_key,
+)
 from .utils.draft_streamer import DraftStreamer, generate_draft_id
 from .utils.html_format import escape_html
 from .utils.image_extractor import (
@@ -243,7 +251,9 @@ class MessageOrchestrator:
             current_dir = project_root
 
         context.user_data["current_directory"] = current_dir
-        context.user_data["claude_session_id"] = state.get("claude_session_id")
+        context.user_data[user_data_session_key(update)] = state.get(
+            "claude_session_id"
+        )
         context.user_data["_thread_context"] = {
             "chat_id": chat.id,
             "message_thread_id": message_thread_id,
@@ -268,10 +278,16 @@ class MessageOrchestrator:
         if not self._is_within(current_dir, project_root) or not current_dir.is_dir():
             current_dir = project_root
 
+        # Reconstruct the per-scope session key from the thread_context the
+        # routing layer cached (this path has no Update object in scope).
+        scope_session_key = (
+            f"claude_session_id:{thread_context['chat_id']}:"
+            f"{thread_context['message_thread_id'] or 0}"
+        )
         thread_states = context.user_data.setdefault("thread_state", {})
         thread_states[thread_context["state_key"]] = {
             "current_directory": str(current_dir),
-            "claude_session_id": context.user_data.get("claude_session_id"),
+            "claude_session_id": context.user_data.get(scope_session_key),
             "project_slug": thread_context["project_slug"],
         }
 
@@ -303,6 +319,44 @@ class MessageOrchestrator:
         if chat and getattr(chat, "is_forum", False):
             return 1
         return None
+
+    async def _ensure_dm_workdir_or_abort(
+        self,
+        update: Update,
+        progress_msg: Any = None,
+    ) -> bool:
+        """Lazily provision ``/workspace/_dm_<user_id>`` for DM scopes.
+
+        Returns ``True`` when the workdir is ready (non-DM scopes are a
+        no-op that still returns ``True``). Returns ``False`` when the
+        mkdir failed — in that case a user-facing error has already been
+        sent via ``progress_msg`` (if provided) or ``update.message`` and
+        the caller MUST abort the turn without inserting a session row.
+        """
+        if not is_dm(update):
+            return True
+        try:
+            ensure_dm_workdir(update)
+            return True
+        except DmWorkdirError as exc:
+            logger.error(
+                "Failed to create DM workspace",
+                error=str(exc),
+                user_id=update.effective_user.id if update.effective_user else None,
+            )
+            error_text = (
+                "❌ Could not create your DM workspace. " "Please contact the admin."
+            )
+            try:
+                if progress_msg is not None:
+                    await progress_msg.edit_text(error_text, reply_markup=None)
+                elif update.message is not None:
+                    await update.message.reply_text(error_text)
+                elif update.callback_query is not None:
+                    await update.callback_query.answer(error_text, show_alert=True)
+            except Exception:
+                logger.debug("Failed to surface DM workdir error to user")
+            return False
 
     async def _reject_for_thread_mode(self, update: Update, message: str) -> None:
         """Send a guidance response when strict thread routing rejects an update."""
@@ -622,7 +676,7 @@ class MessageOrchestrator:
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
         """Reset session, one-line confirmation."""
-        context.user_data["claude_session_id"] = None
+        context.user_data[user_data_session_key(update)] = None
         context.user_data["session_started"] = True
         context.user_data["force_new_session"] = True
         # Clear voice reply preference on new session (spec requirement)
@@ -639,7 +693,7 @@ class MessageOrchestrator:
         )
         dir_display = str(current_dir)
 
-        session_id = context.user_data.get("claude_session_id")
+        session_id = context.user_data.get(user_data_session_key(update))
         session_status = "active" if session_id else "none"
 
         # Cost info
@@ -1330,10 +1384,27 @@ class MessageOrchestrator:
             )
             return
 
-        current_dir = context.user_data.get(
-            "current_directory", self.settings.approved_directory
-        )
-        session_id = context.user_data.get("claude_session_id")
+        session_key = user_data_session_key(update)
+        _user_id, chat_id, thread_id = scope_key(update)
+        session_id = context.user_data.get(session_key)
+
+        # DM scope: provision /workspace/_dm_<user_id> lazily. Fail loud —
+        # do NOT fall back to a shared workdir.
+        if not await self._ensure_dm_workdir_or_abort(update, progress_msg):
+            self._active_requests.pop(user_id, None)
+            return
+
+        # Bind the Claude working directory to the DM per-user workdir when
+        # the scope is a DM — otherwise Claude would run at the shared
+        # approved_directory root and cross-user isolation would be broken.
+        # Forum topics / group chats keep the usual resolution.
+        if is_dm(update):
+            current_dir = dm_workdir_for(update.effective_user.id)
+            context.user_data["current_directory"] = current_dir
+        else:
+            current_dir = context.user_data.get(
+                "current_directory", self.settings.approved_directory
+            )
 
         # Check if /new was used — skip auto-resume for this first message.
         # Flag is only cleared after a successful run so retries keep the intent.
@@ -1382,13 +1453,15 @@ class MessageOrchestrator:
                 interrupt_event=interrupt_event,
                 model_override=context.user_data.get("model_override"),
                 effort_override=context.user_data.get("effort_override"),
+                chat_id=chat_id,
+                thread_id=thread_id,
             )
 
             # New session created successfully — clear the one-shot flag
             if force_new:
                 context.user_data["force_new_session"] = False
 
-            context.user_data["claude_session_id"] = claude_response.session_id
+            context.user_data[session_key] = claude_response.session_id
 
             # Track directory changes
             from .handlers.message import _update_working_directory_from_claude_response
@@ -1642,10 +1715,23 @@ class MessageOrchestrator:
             )
             return
 
-        current_dir = context.user_data.get(
-            "current_directory", self.settings.approved_directory
-        )
-        session_id = context.user_data.get("claude_session_id")
+        session_key = user_data_session_key(update)
+        _user_id, chat_id, thread_id = scope_key(update)
+        session_id = context.user_data.get(session_key)
+
+        # DM scope: provision /workspace/_dm_<user_id> lazily. Fail loud.
+        if not await self._ensure_dm_workdir_or_abort(update, progress_msg):
+            return
+
+        # Bind working directory to the per-user DM workdir in DM scope; see
+        # agentic_text for the rationale.
+        if is_dm(update):
+            current_dir = dm_workdir_for(update.effective_user.id)
+            context.user_data["current_directory"] = current_dir
+        else:
+            current_dir = context.user_data.get(
+                "current_directory", self.settings.approved_directory
+            )
 
         # Check if /new was used — skip auto-resume for this first message.
         # Flag is only cleared after a successful run so retries keep the intent.
@@ -1674,12 +1760,14 @@ class MessageOrchestrator:
                 force_new=force_new,
                 model_override=context.user_data.get("model_override"),
                 effort_override=context.user_data.get("effort_override"),
+                chat_id=chat_id,
+                thread_id=thread_id,
             )
 
             if force_new:
                 context.user_data["force_new_session"] = False
 
-            context.user_data["claude_session_id"] = claude_response.session_id
+            context.user_data[session_key] = claude_response.session_id
 
             from .handlers.message import _update_working_directory_from_claude_response
 
@@ -1856,11 +1944,24 @@ class MessageOrchestrator:
             )
             return
 
-        current_dir = context.user_data.get(
-            "current_directory", self.settings.approved_directory
-        )
-        session_id = context.user_data.get("claude_session_id")
+        session_key = user_data_session_key(update)
+        _user_id, chat_id, thread_id = scope_key(update)
+        session_id = context.user_data.get(session_key)
         force_new = bool(context.user_data.get("force_new_session"))
+
+        # DM scope: provision /workspace/_dm_<user_id> lazily. Fail loud.
+        if not await self._ensure_dm_workdir_or_abort(update, progress_msg):
+            return
+
+        # Bind working directory to the per-user DM workdir in DM scope; see
+        # agentic_text for the rationale.
+        if is_dm(update):
+            current_dir = dm_workdir_for(update.effective_user.id)
+            context.user_data["current_directory"] = current_dir
+        else:
+            current_dir = context.user_data.get(
+                "current_directory", self.settings.approved_directory
+            )
 
         verbose_level = self._get_verbose_level(context)
         voice_mode = context.user_data.get("voice_reply", "off")
@@ -1889,6 +1990,8 @@ class MessageOrchestrator:
                 images=images,
                 model_override=context.user_data.get("model_override"),
                 effort_override=context.user_data.get("effort_override"),
+                chat_id=chat_id,
+                thread_id=thread_id,
             )
         finally:
             heartbeat.cancel()
@@ -1896,7 +1999,7 @@ class MessageOrchestrator:
         if force_new:
             context.user_data["force_new_session"] = False
 
-        context.user_data["claude_session_id"] = claude_response.session_id
+        context.user_data[session_key] = claude_response.session_id
 
         from .handlers.message import _update_working_directory_from_claude_response
 
@@ -2056,16 +2159,20 @@ class MessageOrchestrator:
 
             context.user_data["current_directory"] = target_path
 
-            # Try to find a resumable session
+            # Try to find a resumable session scoped to this (user, chat, thread)
             claude_integration = context.bot_data.get("claude_integration")
             session_id = None
+            _user_id, chat_id, thread_id = scope_key(update)
             if claude_integration:
                 existing = await claude_integration._find_resumable_session(
-                    update.effective_user.id, target_path
+                    update.effective_user.id,
+                    target_path,
+                    chat_id=chat_id,
+                    thread_id=thread_id,
                 )
                 if existing:
                     session_id = existing.session_id
-            context.user_data["claude_session_id"] = session_id
+            context.user_data[user_data_session_key(update)] = session_id
 
             is_git = (target_path / ".git").is_dir()
             git_badge = " (git)" if is_git else ""
@@ -2180,16 +2287,20 @@ class MessageOrchestrator:
 
         context.user_data["current_directory"] = new_path
 
-        # Look for a resumable session instead of always clearing
+        # Look for a resumable session scoped to this (user, chat, thread)
         claude_integration = context.bot_data.get("claude_integration")
         session_id = None
+        _user_id, chat_id, thread_id = scope_key(query)
         if claude_integration:
             existing = await claude_integration._find_resumable_session(
-                query.from_user.id, new_path
+                query.from_user.id,
+                new_path,
+                chat_id=chat_id,
+                thread_id=thread_id,
             )
             if existing:
                 session_id = existing.session_id
-        context.user_data["claude_session_id"] = session_id
+        context.user_data[user_data_session_key(query)] = session_id
 
         is_git = (new_path / ".git").is_dir()
         git_badge = " (git)" if is_git else ""

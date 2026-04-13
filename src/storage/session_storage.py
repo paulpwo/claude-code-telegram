@@ -60,9 +60,19 @@ class SQLiteSessionStorage(SessionStorage):
                 )
 
     async def save_session(self, session: ClaudeSession) -> None:
-        """Save session to database."""
+        """Save session to database.
+
+        Persists the ``(user_id, chat_id, thread_id)`` scope alongside the
+        session. ``chat_id`` / ``thread_id`` come from attributes on
+        ``ClaudeSession`` when available; otherwise they fall back to
+        ``None`` / ``0`` so pre-scope callers keep working until Batch 2
+        migrates every handler.
+        """
         # Ensure user exists before creating session
         await self._ensure_user_exists(session.user_id)
+
+        chat_id = getattr(session, "chat_id", None)
+        thread_id = getattr(session, "thread_id", 0) or 0
 
         session_model = SessionModel(
             session_id=session.session_id,
@@ -73,14 +83,23 @@ class SQLiteSessionStorage(SessionStorage):
             total_cost=session.total_cost,
             total_turns=session.total_turns,
             message_count=session.message_count,
+            chat_id=chat_id,
+            thread_id=thread_id,
         )
 
         async with self.db_manager.get_connection() as conn:
-            # Try to update first
+            # Try to update first. Include the scope columns so a resumed
+            # session (same session_id but first time we learn the scope)
+            # backfills ``chat_id`` / ``thread_id`` on the existing row.
             cursor = await conn.execute(
                 """
                 UPDATE sessions
-                SET last_used = ?, total_cost = ?, total_turns = ?, message_count = ?
+                SET last_used = ?,
+                    total_cost = ?,
+                    total_turns = ?,
+                    message_count = ?,
+                    chat_id = ?,
+                    thread_id = ?
                 WHERE session_id = ?
             """,
                 (
@@ -88,6 +107,8 @@ class SQLiteSessionStorage(SessionStorage):
                     session_model.total_cost,
                     session_model.total_turns,
                     session_model.message_count,
+                    session_model.chat_id,
+                    session_model.thread_id,
                     session_model.session_id,
                 ),
             )
@@ -98,8 +119,8 @@ class SQLiteSessionStorage(SessionStorage):
                     """
                     INSERT INTO sessions
                     (session_id, user_id, project_path, created_at, last_used,
-                     total_cost, total_turns, message_count)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     total_cost, total_turns, message_count, chat_id, thread_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         session_model.session_id,
@@ -110,6 +131,8 @@ class SQLiteSessionStorage(SessionStorage):
                         session_model.total_cost,
                         session_model.total_turns,
                         session_model.message_count,
+                        session_model.chat_id,
+                        session_model.thread_id,
                     ),
                 )
 
@@ -122,9 +145,21 @@ class SQLiteSessionStorage(SessionStorage):
         )
 
     async def load_session(
-        self, session_id: str, user_id: int
+        self,
+        session_id: str,
+        user_id: int,
+        chat_id: Optional[int] = None,
+        thread_id: int = 0,
     ) -> Optional[ClaudeSession]:
-        """Load session from database, filtered by user ownership."""
+        """Load session from database, filtered by user ownership.
+
+        ``chat_id`` and ``thread_id`` are accepted for forward compatibility
+        with Batch 2 callers but are intentionally NOT part of the lookup
+        predicate — ``session_id`` is globally unique (assigned by Claude),
+        and the design keeps ``SessionManager`` identity on ``session_id``.
+        The scope is still written back on ``save_session`` so the row is
+        recoverable by scope after a restart.
+        """
         async with self.db_manager.get_connection() as conn:
             cursor = await conn.execute(
                 "SELECT * FROM sessions WHERE session_id = ? AND user_id = ?",
@@ -157,6 +192,46 @@ class SQLiteSessionStorage(SessionStorage):
             )
 
             return claude_session
+
+    async def load_session_by_scope(
+        self, user_id: int, chat_id: int, thread_id: int
+    ) -> Optional[ClaudeSession]:
+        """Load the active session for ``(user_id, chat_id, thread_id)``.
+
+        Returns the most-recently-used active row. Legacy pre-v8 rows have
+        ``chat_id IS NULL`` AND are marked ``is_active=FALSE`` by migration
+        v8, so they're naturally excluded by the active filter.
+        """
+        async with self.db_manager.get_connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT * FROM sessions
+                WHERE user_id = ?
+                  AND chat_id = ?
+                  AND thread_id = ?
+                  AND is_active = TRUE
+                ORDER BY last_used DESC
+                LIMIT 1
+                """,
+                (user_id, chat_id, thread_id),
+            )
+            row = await cursor.fetchone()
+
+            if not row:
+                return None
+
+            session_model = SessionModel.from_row(row)
+            return ClaudeSession(
+                session_id=session_model.session_id,
+                user_id=session_model.user_id,
+                project_path=Path(session_model.project_path),
+                created_at=session_model.created_at,
+                last_used=session_model.last_used,
+                total_cost=session_model.total_cost,
+                total_turns=session_model.total_turns,
+                message_count=session_model.message_count,
+                tools_used=[],
+            )
 
     async def delete_session(self, session_id: str) -> None:
         """Delete session from database."""

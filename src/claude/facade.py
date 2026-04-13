@@ -42,8 +42,15 @@ class ClaudeIntegration:
         images: Optional[List[Dict[str, str]]] = None,
         model_override: Optional[str] = None,
         effort_override: Optional[str] = None,
+        chat_id: Optional[int] = None,
+        thread_id: int = 0,
     ) -> ClaudeResponse:
-        """Run Claude Code command with full integration."""
+        """Run Claude Code command with full integration.
+
+        ``chat_id``/``thread_id`` identify the Telegram scope and are
+        persisted alongside the session so it can be recovered per scope
+        after restart. They do NOT change session identity.
+        """
         logger.info(
             "Running Claude command",
             user_id=user_id,
@@ -53,6 +60,8 @@ class ClaudeIntegration:
             force_new=force_new,
             model_override=model_override,
             effort_override=effort_override,
+            chat_id=chat_id,
+            thread_id=thread_id,
         )
 
         # If no session_id provided, try to find an existing session for this
@@ -60,7 +69,7 @@ class ClaudeIntegration:
         # Skip auto-resume when force_new is set (e.g. after /new command).
         if not session_id and not force_new:
             existing_session = await self._find_resumable_session(
-                user_id, working_directory
+                user_id, working_directory, chat_id=chat_id, thread_id=thread_id
             )
             if existing_session:
                 session_id = existing_session.session_id
@@ -73,7 +82,11 @@ class ClaudeIntegration:
 
         # Get or create session
         session = await self.session_manager.get_or_create_session(
-            user_id, working_directory, session_id
+            user_id,
+            working_directory,
+            session_id,
+            chat_id=chat_id,
+            thread_id=thread_id,
         )
 
         # Execute command
@@ -112,7 +125,10 @@ class ClaudeIntegration:
 
                     # Create a fresh session and retry
                     session = await self.session_manager.get_or_create_session(
-                        user_id, working_directory
+                        user_id,
+                        working_directory,
+                        chat_id=chat_id,
+                        thread_id=thread_id,
                     )
                     response = await self._execute(
                         prompt=prompt,
@@ -189,16 +205,20 @@ class ClaudeIntegration:
         self,
         user_id: int,
         working_directory: Path,
+        chat_id: Optional[int] = None,
+        thread_id: int = 0,
     ) -> Optional["ClaudeSession"]:  # noqa: F821
         """Find the most recent resumable session for a user in a directory.
 
-        Returns the session if one exists that is non-expired and has a real
-        (non-temporary) session ID from Claude. Returns None otherwise.
+        When ``chat_id`` is provided, prefer sessions that match the full
+        scope triple ``(user_id, chat_id, thread_id)``. Legacy rows
+        (``chat_id is None``) are excluded from the scoped match, ensuring a
+        DM never resurrects a forum-topic session and vice versa.
         """
 
         sessions = await self.session_manager._get_user_sessions(user_id)
 
-        matching_sessions = [
+        base_matches = [
             s
             for s in sessions
             if s.project_path == working_directory
@@ -206,10 +226,22 @@ class ClaudeIntegration:
             and not s.is_expired(self.config.session_timeout_hours)
         ]
 
-        if not matching_sessions:
+        if not base_matches:
             return None
 
-        return max(matching_sessions, key=lambda s: s.last_used)
+        if chat_id is not None:
+            scoped = [
+                s
+                for s in base_matches
+                if s.chat_id == chat_id and s.thread_id == thread_id
+            ]
+            if scoped:
+                return max(scoped, key=lambda s: s.last_used)
+            # No scope match — do NOT fall back to cross-scope sessions.
+            return None
+
+        # No scope supplied (legacy caller): keep historic behavior.
+        return max(base_matches, key=lambda s: s.last_used)
 
     async def continue_session(
         self,
@@ -217,13 +249,17 @@ class ClaudeIntegration:
         working_directory: Path,
         prompt: Optional[str] = None,
         on_stream: Optional[Callable[[StreamUpdate], None]] = None,
+        chat_id: Optional[int] = None,
+        thread_id: int = 0,
     ) -> Optional[ClaudeResponse]:
-        """Continue the most recent session."""
+        """Continue the most recent session for this scope."""
         logger.info(
             "Continuing session",
             user_id=user_id,
             working_directory=str(working_directory),
             has_prompt=bool(prompt),
+            chat_id=chat_id,
+            thread_id=thread_id,
         )
 
         # Get user's sessions
@@ -235,6 +271,14 @@ class ClaudeIntegration:
             for s in sessions
             if s.project_path == working_directory and bool(s.session_id)
         ]
+
+        # When scope is supplied, require a scope match (no cross-scope leak).
+        if chat_id is not None:
+            matching_sessions = [
+                s
+                for s in matching_sessions
+                if s.chat_id == chat_id and s.thread_id == thread_id
+            ]
 
         if not matching_sessions:
             logger.info("No matching sessions found", user_id=user_id)
@@ -251,6 +295,8 @@ class ClaudeIntegration:
             user_id=user_id,
             session_id=latest_session.session_id,
             on_stream=on_stream,
+            chat_id=chat_id,
+            thread_id=thread_id,
         )
 
     async def get_session_info(

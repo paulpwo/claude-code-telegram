@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional
 import aiosqlite
 import structlog
 
+from src.security.secret_scrubber import scrub_secrets
+
 from .database import DatabaseManager
 from .models import (
     AuditLogModel,
@@ -134,13 +136,19 @@ class SessionRepository:
             return SessionModel.from_row(row) if row else None
 
     async def create_session(self, session: SessionModel) -> SessionModel:
-        """Create new session."""
+        """Create new session.
+
+        Persists the ``(user_id, chat_id, thread_id)`` scope alongside the
+        row so sessions can be recovered by scope across restarts (see
+        migration v8 and ``get_by_scope``).
+        """
         async with self.db.get_connection() as conn:
             await conn.execute(
                 """
                 INSERT INTO sessions
-                (session_id, user_id, project_path, created_at, last_used)
-                VALUES (?, ?, ?, ?, ?)
+                (session_id, user_id, project_path, created_at, last_used,
+                 chat_id, thread_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     session.session_id,
@@ -148,6 +156,8 @@ class SessionRepository:
                     session.project_path,
                     session.created_at,
                     session.last_used,
+                    session.chat_id,
+                    session.thread_id,
                 ),
             )
             await conn.commit()
@@ -160,13 +170,18 @@ class SessionRepository:
             return session
 
     async def update_session(self, session: SessionModel):
-        """Update session data."""
+        """Update session data.
+
+        Also overwrites ``chat_id`` / ``thread_id`` on the row so a resume
+        that now knows the scope backfills a pre-scope row correctly.
+        """
         async with self.db.get_connection() as conn:
             await conn.execute(
                 """
                 UPDATE sessions
                 SET last_used = ?, total_cost = ?, total_turns = ?,
-                    message_count = ?, is_active = ?
+                    message_count = ?, is_active = ?,
+                    chat_id = ?, thread_id = ?
                 WHERE session_id = ?
             """,
                 (
@@ -175,10 +190,37 @@ class SessionRepository:
                     session.total_turns,
                     session.message_count,
                     session.is_active,
+                    session.chat_id,
+                    session.thread_id,
                     session.session_id,
                 ),
             )
             await conn.commit()
+
+    async def get_by_scope(
+        self, user_id: int, chat_id: int, thread_id: int
+    ) -> Optional[SessionModel]:
+        """Return the active session for ``(user_id, chat_id, thread_id)``.
+
+        Returns the most-recently-used active row or ``None``. Legacy pre-v8
+        rows (``chat_id IS NULL``) are marked ``is_active=FALSE`` by the
+        migration and therefore excluded here.
+        """
+        async with self.db.get_connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT * FROM sessions
+                WHERE user_id = ?
+                  AND chat_id = ?
+                  AND thread_id = ?
+                  AND is_active = TRUE
+                ORDER BY last_used DESC
+                LIMIT 1
+                """,
+                (user_id, chat_id, thread_id),
+            )
+            row = await cursor.fetchone()
+            return SessionModel.from_row(row) if row else None
 
     async def get_user_sessions(
         self, user_id: int, active_only: bool = True
@@ -493,11 +535,11 @@ class MessageRepository:
                     message.session_id,
                     message.user_id,
                     message.timestamp,
-                    message.prompt,
-                    message.response,
+                    scrub_secrets(message.prompt),
+                    scrub_secrets(message.response),
                     message.cost,
                     message.duration_ms,
-                    message.error,
+                    scrub_secrets(message.error),
                 ),
             )
             await conn.commit()

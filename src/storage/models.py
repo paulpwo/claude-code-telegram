@@ -73,6 +73,12 @@ class SessionModel:
     total_turns: int = 0
     message_count: int = 0
     is_active: bool = True
+    # Scope columns added in migration v8 — sessions are now identified by
+    # the triple (user_id, chat_id, thread_id) so DM, group, and forum-topic
+    # scopes don't collide. ``chat_id`` is Optional because legacy pre-v8
+    # rows have NULL here (they're marked ``is_active=FALSE`` by v8).
+    chat_id: Optional[int] = None
+    thread_id: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""

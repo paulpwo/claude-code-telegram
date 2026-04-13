@@ -169,6 +169,8 @@ def _make_update(text: str) -> MagicMock:
     """Build a minimal Telegram Update mock."""
     update = MagicMock()
     update.effective_user.id = 99
+    update.effective_chat.id = 99
+    update.effective_message.message_thread_id = None
     update.message.text = text
     update.message.reply_text = AsyncMock(return_value=MagicMock(edit_text=AsyncMock()))
     return update
@@ -304,7 +306,9 @@ async def test_sdd_command_session_id_stored_after_success(settings_sdd_enabled)
 
     await sdd_command(update, context)
 
-    assert context.user_data.get("claude_session_id") == "new-session-xyz"
+    from src.bot.session_scope import user_data_session_key
+
+    assert context.user_data.get(user_data_session_key(update)) == "new-session-xyz"
 
 
 # ---------------------------------------------------------------------------
