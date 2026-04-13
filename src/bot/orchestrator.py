@@ -574,9 +574,7 @@ class MessageOrchestrator:
                 BotCommand("git", "Gestionar token GitHub (set/status/logout)"),
             ]
             if self.settings.enable_voice_replies:
-                commands.append(
-                    BotCommand("voice", "Toggle voice replies (on/off/auto)")
-                )
+                commands.append(BotCommand("voice", "Toggle voice replies (on/off)"))
             commands.append(
                 BotCommand(
                     "topics", "Registrar y gestionar proyectos vinculados a topics"
@@ -865,13 +863,12 @@ class MessageOrchestrator:
     async def agentic_voice_command(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """Handle /voice on|off|auto|set — toggle outgoing voice note replies.
+        """Handle /voice on|off|set — enable/disable outgoing voice note replies.
 
         Usage:
             /voice       — show current status
-            /voice on    — always reply with voice notes
-            /voice off   — always reply with text (default)
-            /voice auto  — voice when you explicitly ask for it
+            /voice on    — enable voice notes (Claude decides when to use them)
+            /voice off   — disable voice notes, always reply with text
             /voice set   — pick a voice from edge-tts (interactive menu)
         """
         if not self.settings.enable_voice_replies:
@@ -885,17 +882,16 @@ class MessageOrchestrator:
 
         if not args:
             # Show current status
-            current = context.user_data.get("voice_reply", "off")
+            current = context.user_data.get("voice_reply", "on")
             current_voice = context.user_data.get(
                 "tts_voice_override", self.settings.edge_tts_voice
             )
             await update.message.reply_text(
                 f"Voice replies: <b>{current}</b>  ·  Voice: <code>{current_voice}</code>\n\n"
-                "Usage: <code>/voice on|off|auto|set</code>\n"
-                "  on   = always send voice notes\n"
-                "  off  = always send text (default)\n"
-                "  auto = voice when you ask for it (keyword detection)\n"
-                "  set  = pick a voice from the available list",
+                "Usage: <code>/voice on|off|set</code>\n"
+                "  on  = Claude decides when to send voice notes based on context\n"
+                "  off = always reply with text\n"
+                "  set = pick a voice from the available list",
                 parse_mode="HTML",
             )
             return
@@ -920,79 +916,22 @@ class MessageOrchestrator:
             )
             return
 
-        if arg not in {"on", "off", "auto"}:
+        # Accept "auto" as alias for "on" for backwards compatibility.
+        if arg == "auto":
+            arg = "on"
+        if arg not in {"on", "off"}:
             await update.message.reply_text(
-                "Invalid argument. Usage: <code>/voice on|off|auto|set</code>",
+                "Invalid argument. Usage: <code>/voice on|off|set</code>",
                 parse_mode="HTML",
             )
             return
 
         context.user_data["voice_reply"] = arg
         labels = {
-            "on": "Voice replies enabled — I'll reply with voice notes.",
-            "off": "Voice replies disabled — I'll reply with text.",
-            "auto": "Auto voice mode — sends voice when you ask for it (e.g. 'nota de voz').",
+            "on": "Voice replies enabled — Claude will send voice notes when appropriate.",
+            "off": "Voice replies disabled — I'll always reply with text.",
         }
         await update.message.reply_text(labels[arg])
-
-    # Keywords that signal the user explicitly wants a voice reply.
-    _VOICE_REQUEST_KEYWORDS: frozenset = frozenset(
-        [
-            # Spanish
-            "en voz",
-            "respondé en audio",
-            "responde en audio",
-            "nota de voz",
-            "mandame un audio",
-            "mándame un audio",
-            "mandame audio",
-            "audio",
-            "voz",
-            "escúchame",
-            "escuchame",
-            # English
-            "voice note",
-            "respond with audio",
-            "send audio",
-            "voice",
-        ]
-    )
-
-    def _user_wants_voice(self, user_message: str) -> bool:
-        """Return True if the user's message contains an explicit voice request."""
-        normalized = user_message.lower()
-        return any(kw in normalized for kw in self._VOICE_REQUEST_KEYWORDS)
-
-    def _should_send_voice(
-        self,
-        context: ContextTypes.DEFAULT_TYPE,
-        response_text: str,
-        user_message: str = "",
-    ) -> bool:
-        """Return True if the reply should be sent as a voice note.
-
-        Logic:
-        - voice_reply == "off"  → always False
-        - voice_reply == "on"   → True only when the user's message explicitly
-                                   requests a voice reply (keyword detection)
-        - voice_reply == "auto" → True when word count of *response* ≤
-                                   voice_reply_max_words, ignoring user intent
-
-        Default mode is derived from VOICE_REPLY_MODE config:
-        - "manual" → default "off" (user must /voice on)
-        - "auto"   → default "auto" (voice replies enabled automatically)
-        """
-        if not self.settings.enable_voice_replies:
-            return False
-
-        default_mode = "auto" if self.settings.voice_reply_mode == "auto" else "off"
-        mode = context.user_data.get("voice_reply", default_mode)
-        if mode == "off":
-            return False
-        if mode == "on":
-            return self._user_wants_voice(user_message)
-        # "auto": send voice when response is short enough
-        return len(response_text.split()) <= self.settings.voice_reply_max_words
 
     def _get_verbose_level(self, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Return effective verbose level: per-user override or global default."""
@@ -1136,6 +1075,7 @@ class MessageOrchestrator:
         reply_markup: Optional[InlineKeyboardMarkup] = None,
         mcp_images: Optional[List[ImageAttachment]] = None,
         approved_directory: Optional[Path] = None,
+        mcp_voice_requests: Optional[List[str]] = None,
         draft_streamer: Optional[DraftStreamer] = None,
         interrupt_event: Optional[asyncio.Event] = None,
     ) -> Optional[Callable[[StreamUpdate], Any]]:
@@ -1153,7 +1093,9 @@ class MessageOrchestrator:
         collection or draft streaming is requested.
         Typing indicators are handled by a separate heartbeat task.
         """
-        need_mcp_intercept = mcp_images is not None and approved_directory is not None
+        need_mcp_intercept = (
+            mcp_images is not None and approved_directory is not None
+        ) or mcp_voice_requests is not None
 
         if verbose_level == 0 and not need_mcp_intercept and draft_streamer is None:
             return None
@@ -1165,16 +1107,17 @@ class MessageOrchestrator:
             if interrupt_event is not None and interrupt_event.is_set():
                 return
 
-            # Intercept send_image_to_user MCP tool calls.
+            # Intercept MCP tool calls (send_image_to_user, send_voice_reply).
             # The SDK namespaces MCP tools as "mcp__<server>__<tool>",
             # so match both the bare name and the namespaced variant.
             if update_obj.tool_calls and need_mcp_intercept:
                 for tc in update_obj.tool_calls:
                     tc_name = tc.get("name", "")
+                    tc_input = tc.get("input", {})
+
                     if tc_name == "send_image_to_user" or tc_name.endswith(
                         "__send_image_to_user"
                     ):
-                        tc_input = tc.get("input", {})
                         file_path = tc_input.get("file_path", "")
                         caption = tc_input.get("caption", "")
                         img = validate_image_path(
@@ -1182,6 +1125,13 @@ class MessageOrchestrator:
                         )
                         if img:
                             mcp_images.append(img)
+
+                    elif tc_name == "send_voice_reply" or tc_name.endswith(
+                        "__send_voice_reply"
+                    ):
+                        text = tc_input.get("text", "").strip()
+                        if text and mcp_voice_requests is not None:
+                            mcp_voice_requests.append(text)
 
             # Capture tool calls
             if update_obj.tool_calls:
@@ -1352,12 +1302,6 @@ class MessageOrchestrator:
 
         verbose_level = self._get_verbose_level(context)
 
-        # Suppress streaming output when voice mode is active — the user will receive
-        # a voice note, so showing intermediate text is noise. Force quiet mode.
-        voice_mode = context.user_data.get("voice_reply", "off")
-        if voice_mode in ("on", "auto") and self.settings.enable_voice_replies:
-            verbose_level = 0
-
         # Create Stop button and interrupt event
         interrupt_event = asyncio.Event()
         stop_kb = InlineKeyboardMarkup(
@@ -1414,6 +1358,7 @@ class MessageOrchestrator:
         tool_log: List[Dict[str, Any]] = []
         start_time = time.time()
         mcp_images: List[ImageAttachment] = []
+        mcp_voice_requests: List[str] = []
 
         # Stream drafts (private chats only)
         draft_streamer: Optional[DraftStreamer] = None
@@ -1434,6 +1379,7 @@ class MessageOrchestrator:
             reply_markup=stop_kb,
             mcp_images=mcp_images,
             approved_directory=self.settings.approved_directory,
+            mcp_voice_requests=mcp_voice_requests,
             draft_streamer=draft_streamer,
             interrupt_event=interrupt_event,
         )
@@ -1523,36 +1469,22 @@ class MessageOrchestrator:
         # Use MCP-collected images (from send_image_to_user tool calls)
         images: List[ImageAttachment] = mcp_images
 
-        # --- Voice reply path ---
-        # Attempt to send as voice note when user has enabled /voice on|auto.
-        # When voice mode is active, join all message parts into one text so that
-        # multi-part Claude responses are still delivered as a single voice note.
-        if not images and self._should_send_voice(
-            context, "", user_message=message_text
-        ):
-            full_text = (
-                "\n\n".join(
-                    m.text for m in formatted_messages if m.text and m.text.strip()
-                )
-                or None
-            )
-        else:
-            full_text = (
-                formatted_messages[0].text
-                if len(formatted_messages) == 1 and formatted_messages[0].text
-                else None
-            )
+        # --- MCP voice reply path ---
+        # Claude explicitly called send_voice_reply — synthesize and deliver.
         voice_sent = False
+        voice_mode = context.user_data.get("voice_reply", "on")
+        mcp_voice_text = "\n\n".join(mcp_voice_requests) if mcp_voice_requests else None
         if (
-            full_text
+            mcp_voice_text
             and not images
-            and self._should_send_voice(context, full_text, user_message=message_text)
+            and voice_mode != "off"
+            and self.settings.enable_voice_replies
         ):
             features = context.bot_data.get("features")
             voice_sender = features.get_voice_sender() if features else None
             if voice_sender:
                 voice_sent = await voice_sender.send_voice_reply(
-                    text=full_text,
+                    text=mcp_voice_text,
                     update=update,
                     reply_to_message_id=update.message.message_id,
                     voice_override=context.user_data.get("tts_voice_override"),
@@ -1560,7 +1492,7 @@ class MessageOrchestrator:
                 if not voice_sent:
                     logger.warning(
                         "Voice send failed, falling back to text reply",
-                        word_count=len(full_text.split()),
+                        word_count=len(mcp_voice_text.split()),
                     )
 
         # Try to combine text + images in one message when possible
@@ -1964,11 +1896,9 @@ class MessageOrchestrator:
             )
 
         verbose_level = self._get_verbose_level(context)
-        voice_mode = context.user_data.get("voice_reply", "off")
-        if voice_mode in ("on", "auto") and self.settings.enable_voice_replies:
-            verbose_level = 0
         tool_log: List[Dict[str, Any]] = []
         mcp_images_media: List[ImageAttachment] = []
+        mcp_voice_requests_media: List[str] = []
         on_stream = self._make_stream_callback(
             verbose_level,
             progress_msg,
@@ -1976,6 +1906,7 @@ class MessageOrchestrator:
             time.time(),
             mcp_images=mcp_images_media,
             approved_directory=self.settings.approved_directory,
+            mcp_voice_requests=mcp_voice_requests_media,
         )
 
         heartbeat = self._start_typing_heartbeat(chat)
@@ -2020,34 +1951,24 @@ class MessageOrchestrator:
         # Use MCP-collected images (from send_image_to_user tool calls).
         images: List[ImageAttachment] = mcp_images_media
 
-        # --- Voice reply path ---
-        # Attempt to send as voice note when user has enabled /voice on|auto.
-        # When voice mode is active, join all message parts into one text so that
-        # multi-part Claude responses are still delivered as a single voice note.
-        if not images and self._should_send_voice(context, "", user_message=prompt):
-            full_text = (
-                "\n\n".join(
-                    m.text for m in formatted_messages if m.text and m.text.strip()
-                )
-                or None
-            )
-        else:
-            full_text = (
-                formatted_messages[0].text
-                if len(formatted_messages) == 1 and formatted_messages[0].text
-                else None
-            )
+        # --- MCP voice reply path ---
+        # Claude explicitly called send_voice_reply — synthesize and deliver.
         voice_sent = False
+        voice_mode = context.user_data.get("voice_reply", "on")
+        mcp_voice_text = (
+            "\n\n".join(mcp_voice_requests_media) if mcp_voice_requests_media else None
+        )
         if (
-            full_text
+            mcp_voice_text
             and not images
-            and self._should_send_voice(context, full_text, user_message=prompt)
+            and voice_mode != "off"
+            and self.settings.enable_voice_replies
         ):
             features = context.bot_data.get("features")
             voice_sender = features.get_voice_sender() if features else None
             if voice_sender:
                 voice_sent = await voice_sender.send_voice_reply(
-                    text=full_text,
+                    text=mcp_voice_text,
                     update=update,
                     reply_to_message_id=update.message.message_id,
                     voice_override=context.user_data.get("tts_voice_override"),
@@ -2055,7 +1976,7 @@ class MessageOrchestrator:
                 if not voice_sent:
                     logger.warning(
                         "Voice send failed, falling back to text reply",
-                        word_count=len(full_text.split()),
+                        word_count=len(mcp_voice_text.split()),
                     )
 
         if voice_sent:

@@ -328,10 +328,14 @@ class ClaudeSDKManager:
                 f"All file operations must stay within {working_directory}. "
                 "Use relative paths.\n\n"
                 "## Voice Replies\n"
-                "The bot layer automatically converts your text responses to voice notes when the user "
-                "has voice mode enabled. You do NOT need to do anything special. "
-                "Just respond normally with text — never mention TTS, edge-tts, scripts, sandbox, "
-                "or voice activation commands. Never say you cannot send voice."
+                "You can send voice notes via the `send_voice_reply(text)` MCP tool.\n"
+                "USE IT when: the user explicitly asks for audio/voice, or a short conversational "
+                "reply would feel natural as spoken audio.\n"
+                "DO NOT use it for: code, long technical output, markdown-heavy responses, or when "
+                "the user says they do not want voice.\n"
+                "When you call send_voice_reply, write *text* as natural spoken language — no "
+                "markdown, no bullet points, no code fences. The text response will not be shown "
+                "to the user; only the voice note is delivered."
             )
             claude_md_path = Path(working_directory) / "CLAUDE.md"
             if claude_md_path.exists():

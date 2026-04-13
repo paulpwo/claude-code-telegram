@@ -291,19 +291,6 @@ class Settings(BaseSettings):
     enable_voice_replies: bool = Field(
         False, description="Enable outgoing voice note replies via edge-tts"
     )
-    voice_reply_mode: Literal["manual", "auto"] = Field(
-        "manual",
-        description=(
-            "Voice reply mode: 'manual' (always voice when enabled via /voice on) "
-            "or 'auto' (voice only when reply is short enough)"
-        ),
-    )
-    voice_reply_max_words: int = Field(
-        200,
-        ge=1,
-        le=500,
-        description="Maximum word count for auto voice mode",
-    )
     edge_tts_voice: str = Field(
         "es-CO-GonzaloNeural",
         description="edge-tts voice name for TTS synthesis",
@@ -642,17 +629,6 @@ class Settings(BaseSettings):
                 "voice_provider must be one of ['mistral', 'openai', 'local']"
             )
         return provider
-
-    @field_validator("voice_reply_mode", mode="before")
-    @classmethod
-    def validate_voice_reply_mode(cls, v: Any) -> str:
-        """Validate and normalize voice reply mode."""
-        if v is None:
-            return "manual"
-        mode = str(v).strip().lower()
-        if mode not in {"manual", "auto"}:
-            raise ValueError("voice_reply_mode must be one of ['manual', 'auto']")
-        return mode
 
     @field_validator("tts_engine", mode="before")
     @classmethod
