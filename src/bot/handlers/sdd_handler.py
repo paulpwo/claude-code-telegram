@@ -10,6 +10,7 @@ The handler is intentionally thin — it only constructs the prompt and routes
 the response.
 """
 
+import html
 import re
 from pathlib import Path
 from typing import Optional, Tuple
@@ -232,11 +233,12 @@ async def sdd_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         # Telegram message limit is 4096 chars — truncate gracefully
         MAX_LEN = 4000
-        if len(response_text) > MAX_LEN:
-            response_text = response_text[:MAX_LEN] + "\n\n… <i>(truncated)</i>"
+        safe_response = html.escape(response_text)
+        if len(safe_response) > MAX_LEN:
+            safe_response = safe_response[:MAX_LEN] + "\n\n… <i>(truncated)</i>"
 
         await progress_msg.edit_text(
-            f"✅ <b>SDD Analysis Complete</b>\n\n{response_text}",
+            f"✅ <b>SDD Analysis Complete</b>\n\n{safe_response}",
             parse_mode="HTML",
         )
 
