@@ -457,6 +457,126 @@ async def test_agentic_voice_calls_claude(agentic_settings, deps, monkeypatch):
     )
 
 
+async def test_agentic_text_dm_uses_dm_workdir_as_working_directory(
+    agentic_settings, deps, monkeypatch
+):
+    """DM scope must bind working_directory to /workspace/_dm_<user_id>.
+
+    Regression guard for R2: the mkdir was previously unused — the Claude
+    run still received the shared approved_directory, which defeated
+    cross-user isolation. See sdd/session-scoping/verify-report.
+    """
+    # Stub the filesystem-touching side of ensure_dm_workdir — the test
+    # only cares about what gets passed to run_command.
+    monkeypatch.setattr(
+        "src.bot.orchestrator.ensure_dm_workdir",
+        lambda update: Path("/workspace/_dm_123"),
+    )
+    orchestrator = MessageOrchestrator(agentic_settings, deps)
+
+    mock_response = MagicMock()
+    mock_response.session_id = "session-dm-1"
+    mock_response.content = "ok"
+    mock_response.tools_used = []
+
+    claude_integration = AsyncMock()
+    claude_integration.run_command = AsyncMock(return_value=mock_response)
+
+    update = MagicMock()
+    update.effective_user.id = 123
+    update.effective_chat.id = 123  # DM: chat_id == user_id
+    update.effective_message.message_thread_id = None
+    update.message.text = "hi"
+    update.message.message_id = 1
+    update.message.chat.send_action = AsyncMock()
+    update.message.reply_text = AsyncMock()
+
+    progress_msg = AsyncMock()
+    progress_msg.delete = AsyncMock()
+    update.message.reply_text.return_value = progress_msg
+
+    context = MagicMock()
+    context.user_data = {}
+    context.bot_data = {
+        "settings": agentic_settings,
+        "claude_integration": claude_integration,
+        "storage": None,
+        "rate_limiter": None,
+        "audit_logger": None,
+    }
+
+    await orchestrator.agentic_text(update, context)
+
+    claude_integration.run_command.assert_awaited_once()
+    kwargs = claude_integration.run_command.await_args.kwargs
+    assert kwargs["working_directory"] == Path("/workspace/_dm_123")
+    # And the shared approved_directory (test fixture's tmp_dir) must NOT
+    # be what Claude sees for a DM turn.
+    assert kwargs["working_directory"] != agentic_settings.approved_directory
+
+
+async def test_agentic_text_forum_topic_does_not_use_dm_workdir(
+    agentic_settings, deps, monkeypatch
+):
+    """Non-DM (forum topic / group) scopes must NOT inherit the DM workdir.
+
+    Guards against accidentally making the branch take the DM path for
+    every update. The existing behavior — explicit current_directory or
+    settings.approved_directory — must be preserved.
+    """
+    # If this test accidentally reached ensure_dm_workdir, it would mean
+    # is_dm() returned True for a forum update. Fail loud in that case.
+    def _should_not_be_called(update):
+        raise AssertionError(
+            "ensure_dm_workdir must not run for a forum-topic update"
+        )
+
+    monkeypatch.setattr(
+        "src.bot.orchestrator.ensure_dm_workdir", _should_not_be_called
+    )
+    orchestrator = MessageOrchestrator(agentic_settings, deps)
+
+    mock_response = MagicMock()
+    mock_response.session_id = "session-topic-1"
+    mock_response.content = "ok"
+    mock_response.tools_used = []
+
+    claude_integration = AsyncMock()
+    claude_integration.run_command = AsyncMock(return_value=mock_response)
+
+    update = MagicMock()
+    update.effective_user.id = 123
+    update.effective_chat.id = -1001234567890  # group
+    update.effective_message.message_thread_id = 42  # forum topic
+    update.message.text = "hi"
+    update.message.message_id = 1
+    update.message.chat.send_action = AsyncMock()
+    update.message.reply_text = AsyncMock()
+
+    progress_msg = AsyncMock()
+    progress_msg.delete = AsyncMock()
+    update.message.reply_text.return_value = progress_msg
+
+    context = MagicMock()
+    context.user_data = {}
+    context.bot_data = {
+        "settings": agentic_settings,
+        "claude_integration": claude_integration,
+        "storage": None,
+        "rate_limiter": None,
+        "audit_logger": None,
+    }
+
+    await orchestrator.agentic_text(update, context)
+
+    claude_integration.run_command.assert_awaited_once()
+    kwargs = claude_integration.run_command.await_args.kwargs
+    # Forum topic with no explicit current_directory → approved_directory.
+    assert kwargs["working_directory"] == agentic_settings.approved_directory
+    # And definitely not the DM path.
+    assert kwargs["working_directory"] != Path("/workspace/_dm_123")
+
+
 async def test_agentic_voice_missing_handler_is_provider_aware(tmp_path, deps):
     """Missing voice handler guidance references the configured provider key."""
     settings = create_test_config(
