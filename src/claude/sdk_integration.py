@@ -2,9 +2,19 @@
 
 import asyncio
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional
+
+# Absolute path to the internal Telegram MCP server script.
+# Must be absolute because the Claude CLI spawns MCP server subprocesses
+# using the conversation's working directory (e.g. /workspace/_dm_xxx) as cwd,
+# not the application root (/app). A relative path like "src/mcp/telegram_server.py"
+# would fail to resolve in any user workspace.
+_TELEGRAM_SERVER_PATH = str(
+    Path(__file__).parent.parent / "mcp" / "telegram_server.py"
+)
 
 import structlog
 from claude_agent_sdk import (
@@ -388,8 +398,8 @@ class ClaudeSDKManager:
             # are merged in on top.
             telegram_server = {
                 "telegram": {
-                    "command": "python",
-                    "args": ["src/mcp/telegram_server.py"],
+                    "command": sys.executable,
+                    "args": [_TELEGRAM_SERVER_PATH],
                 }
             }
             if self.config.enable_mcp and self.config.mcp_config_path:
