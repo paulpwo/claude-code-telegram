@@ -382,13 +382,24 @@ class ClaudeSDKManager:
                     effort_override=effort_override,
                 )
 
-            # Pass MCP server configuration if enabled
+            # The internal telegram MCP server is always active — it exposes
+            # send_image_to_user and send_voice_reply to Claude.
+            # If ENABLE_MCP=true, any user-defined servers in mcp_config_path
+            # are merged in on top.
+            telegram_server = {
+                "telegram": {
+                    "command": "python",
+                    "args": ["src/mcp/telegram_server.py"],
+                }
+            }
             if self.config.enable_mcp and self.config.mcp_config_path:
-                options.mcp_servers = self._load_mcp_config(self.config.mcp_config_path)
+                extra = self._load_mcp_config(self.config.mcp_config_path)
+                telegram_server.update(extra)
                 logger.info(
-                    "MCP servers configured",
+                    "Extra MCP servers merged",
                     mcp_config_path=str(self.config.mcp_config_path),
                 )
+            options.mcp_servers = telegram_server
 
             # Wire can_use_tool callback for preventive tool validation
             if self.security_validator:

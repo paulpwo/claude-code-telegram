@@ -297,14 +297,13 @@ class TestClaudeSDKManager:
                 working_directory=tmp_path,
             )
 
-        # Verify MCP config was parsed and passed as dict to options
+        # telegram server always present; extra servers merged in
         assert len(captured_options) == 1
-        assert captured_options[0].mcp_servers == {
-            "test-server": {"command": "echo", "args": ["hello"]}
-        }
+        assert "telegram" in captured_options[0].mcp_servers
+        assert "test-server" in captured_options[0].mcp_servers
 
     async def test_execute_command_no_mcp_when_disabled(self, sdk_manager):
-        """Test that MCP config is NOT passed when MCP is disabled."""
+        """Test that telegram MCP server is always present even when ENABLE_MCP=false."""
         captured_options = []
         mock_factory = _mock_client_factory(
             _make_assistant_message("Test response"),
@@ -320,9 +319,11 @@ class TestClaudeSDKManager:
                 working_directory=Path("/test"),
             )
 
-        # Verify MCP config was NOT set (should be empty default)
+        # telegram server always active regardless of ENABLE_MCP flag
         assert len(captured_options) == 1
-        assert captured_options[0].mcp_servers == {}
+        assert captured_options[0].mcp_servers == {
+            "telegram": {"command": "python", "args": ["src/mcp/telegram_server.py"]}
+        }
 
     async def test_execute_command_passes_resume_session(self, sdk_manager):
         """Test that session_id is passed as options.resume for continuation."""
