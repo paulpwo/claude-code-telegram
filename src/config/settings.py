@@ -230,7 +230,8 @@ class Settings(BaseSettings):
     # Features
     enable_mcp: bool = Field(False, description="Enable Model Context Protocol")
     mcp_config_path: Optional[Path] = Field(
-        None, description="MCP configuration file path"
+        Path("config/mcp.json"),
+        description="MCP configuration file path (default: config/mcp.json)",
     )
     enable_git_integration: bool = Field(True, description="Enable git commands")
     enable_file_uploads: bool = Field(True, description="Enable file upload handling")
@@ -676,9 +677,7 @@ class Settings(BaseSettings):
                 "auth_token_secret required when enable_token_auth is True"
             )
 
-        # Check MCP requirements
-        if self.enable_mcp and not self.mcp_config_path:
-            raise ValueError("mcp_config_path required when enable_mcp is True")
+        # MCP config path defaults to config/mcp.json — no explicit check needed.
 
         if self.enable_project_threads:
             if (
