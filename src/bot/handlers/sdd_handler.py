@@ -20,6 +20,7 @@ from telegram.ext import ContextTypes
 
 from ...config.settings import Settings
 from ...security.audit import AuditLogger
+from ..session_scope import scope_key, user_data_session_key
 
 logger = structlog.get_logger()
 
@@ -243,7 +244,9 @@ async def sdd_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         logger.error("SDD command: claude_integration not in bot_data", user_id=user_id)
         return
 
-    session_id = context.user_data.get("claude_session_id")
+    session_key = user_data_session_key(update)
+    _user_id, chat_id, thread_id = scope_key(update)
+    session_id = context.user_data.get(session_key)
 
     try:
         claude_response = await claude_integration.run_command(
@@ -251,11 +254,13 @@ async def sdd_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             working_directory=current_dir,
             user_id=user_id,
             session_id=session_id,
+            chat_id=chat_id,
+            thread_id=thread_id,
         )
 
         # Update session ID if a new session was created
         if claude_response and claude_response.session_id:
-            context.user_data["claude_session_id"] = claude_response.session_id
+            context.user_data[session_key] = claude_response.session_id
 
         response_text = (
             claude_response.content
