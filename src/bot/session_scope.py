@@ -26,41 +26,64 @@ full rollout plan.
 
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Any, Tuple, Union
 
-from telegram import Update
+from telegram import CallbackQuery, Update
+
+ScopeSource = Union[Update, CallbackQuery]
 
 
-def scope_key(update: Update) -> Tuple[int, int, int]:
-    """Return the scope triple ``(user_id, chat_id, thread_id)``.
+def _extract_triple(src: Any) -> Tuple[int, int, int]:
+    """Pull ``(user_id, chat_id, thread_id)`` out of an Update or CallbackQuery.
 
-    ``thread_id`` is ``0`` when the update is not inside a forum topic
-    (DM or plain group). The caller MUST treat the triple as opaque —
-    storage and handlers are the only layers that interpret it.
+    ``CallbackQuery`` is accepted because many classic-mode handlers
+    receive only the query, not the parent Update. Deriving the scope
+    from ``query.from_user`` / ``query.message`` yields the same triple.
+    Duck-typed on ``effective_user`` so ``MagicMock``-based tests and
+    future subclasses both work.
     """
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-    msg = update.effective_message
+    if hasattr(src, "effective_user"):
+        user_id = src.effective_user.id
+        chat_id = src.effective_chat.id
+        msg = src.effective_message
+        thread_id = (msg.message_thread_id if msg is not None else None) or 0
+        return (user_id, chat_id, thread_id)
+
+    # CallbackQuery branch
+    user_id = src.from_user.id
+    msg = src.message
+    chat_id = msg.chat.id if msg is not None else user_id
     thread_id = (msg.message_thread_id if msg is not None else None) or 0
     return (user_id, chat_id, thread_id)
 
 
-def user_data_session_key(update: Update) -> str:
+def scope_key(update: ScopeSource) -> Tuple[int, int, int]:
+    """Return the scope triple ``(user_id, chat_id, thread_id)``.
+
+    ``thread_id`` is ``0`` when the update is not inside a forum topic
+    (DM or plain group). Accepts either a ``telegram.Update`` or a
+    ``telegram.CallbackQuery`` — callback handlers often receive only the
+    query.
+    """
+    return _extract_triple(update)
+
+
+def user_data_session_key(update: ScopeSource) -> str:
     """Return the ``user_data`` key for the Claude session id in this scope.
 
     The key includes ``chat_id`` and ``thread_id``. ``user_id`` is implicit
     because ``user_data`` is already keyed by user. Format:
     ``claude_session_id:{chat_id}:{thread_id}``.
     """
-    _user_id, chat_id, thread_id = scope_key(update)
+    _user_id, chat_id, thread_id = _extract_triple(update)
     return f"claude_session_id:{chat_id}:{thread_id}"
 
 
-def is_dm(update: Update) -> bool:
+def is_dm(update: ScopeSource) -> bool:
     """Return ``True`` when the update originates from the user's own DM.
 
     A DM is detected when ``chat_id == user_id`` AND ``thread_id == 0``.
     Forum topics and group chats therefore never match.
     """
-    user_id, chat_id, thread_id = scope_key(update)
+    user_id, chat_id, thread_id = _extract_triple(update)
     return chat_id == user_id and thread_id == 0
