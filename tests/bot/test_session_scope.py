@@ -64,57 +64,39 @@ class TestScopeKeyForumTopic:
     """Forum topics populate ``message_thread_id`` and MUST flow through."""
 
     def test_forum_topic_triple_includes_thread(self) -> None:
-        update = _make_update(
-            user_id=42, chat_id=-1001234, message_thread_id=7
-        )
+        update = _make_update(user_id=42, chat_id=-1001234, message_thread_id=7)
 
         assert scope_key(update) == (42, -1001234, 7)
 
     def test_forum_topic_is_not_dm(self) -> None:
-        update = _make_update(
-            user_id=42, chat_id=-1001234, message_thread_id=7
-        )
+        update = _make_update(user_id=42, chat_id=-1001234, message_thread_id=7)
 
         assert is_dm(update) is False
 
     def test_forum_topic_user_data_key(self) -> None:
-        update = _make_update(
-            user_id=42, chat_id=-1001234, message_thread_id=7
-        )
+        update = _make_update(user_id=42, chat_id=-1001234, message_thread_id=7)
 
-        assert (
-            user_data_session_key(update)
-            == "claude_session_id:-1001234:7"
-        )
+        assert user_data_session_key(update) == "claude_session_id:-1001234:7"
 
 
 class TestScopeKeyPlainGroup:
     """Non-forum groups have no ``message_thread_id`` → default ``thread_id=0``."""
 
     def test_group_without_topic_thread_is_zero(self) -> None:
-        update = _make_update(
-            user_id=42, chat_id=-1009999, message_thread_id=None
-        )
+        update = _make_update(user_id=42, chat_id=-1009999, message_thread_id=None)
 
         assert scope_key(update) == (42, -1009999, 0)
 
     def test_group_is_not_dm(self) -> None:
         # chat_id differs from user_id — not a DM even with thread_id=0.
-        update = _make_update(
-            user_id=42, chat_id=-1009999, message_thread_id=None
-        )
+        update = _make_update(user_id=42, chat_id=-1009999, message_thread_id=None)
 
         assert is_dm(update) is False
 
     def test_group_user_data_key(self) -> None:
-        update = _make_update(
-            user_id=42, chat_id=-1009999, message_thread_id=None
-        )
+        update = _make_update(user_id=42, chat_id=-1009999, message_thread_id=None)
 
-        assert (
-            user_data_session_key(update)
-            == "claude_session_id:-1009999:0"
-        )
+        assert user_data_session_key(update) == "claude_session_id:-1009999:0"
 
 
 class TestScopeKeyMissingMessage:
@@ -131,9 +113,7 @@ class TestScopeKeyStability:
     """Repeated calls on the same ``Update`` must return the same triple/key."""
 
     def test_scope_key_is_stable(self) -> None:
-        update = _make_update(
-            user_id=42, chat_id=-1001234, message_thread_id=7
-        )
+        update = _make_update(user_id=42, chat_id=-1001234, message_thread_id=7)
 
         first = scope_key(update)
         second = scope_key(update)
@@ -142,9 +122,7 @@ class TestScopeKeyStability:
         assert first == second == third == (42, -1001234, 7)
 
     def test_user_data_session_key_is_stable(self) -> None:
-        update = _make_update(
-            user_id=42, chat_id=-1001234, message_thread_id=7
-        )
+        update = _make_update(user_id=42, chat_id=-1001234, message_thread_id=7)
 
         first = user_data_session_key(update)
         second = user_data_session_key(update)
@@ -164,9 +142,7 @@ class TestCrossScopeIsolation:
     def test_dm_and_forum_topic_produce_distinct_keys(self) -> None:
         user_id = 42
         dm = _make_update(user_id=user_id, chat_id=user_id, message_thread_id=None)
-        topic = _make_update(
-            user_id=user_id, chat_id=-1001234, message_thread_id=7
-        )
+        topic = _make_update(user_id=user_id, chat_id=-1001234, message_thread_id=7)
 
         dm_key = user_data_session_key(dm)
         topic_key = user_data_session_key(topic)
@@ -178,12 +154,8 @@ class TestCrossScopeIsolation:
     def test_two_topics_same_group_produce_distinct_keys(self) -> None:
         user_id = 42
         group_id = -1001234
-        topic_a = _make_update(
-            user_id=user_id, chat_id=group_id, message_thread_id=3
-        )
-        topic_b = _make_update(
-            user_id=user_id, chat_id=group_id, message_thread_id=4
-        )
+        topic_a = _make_update(user_id=user_id, chat_id=group_id, message_thread_id=3)
+        topic_b = _make_update(user_id=user_id, chat_id=group_id, message_thread_id=4)
 
         assert user_data_session_key(topic_a) != user_data_session_key(topic_b)
 
@@ -195,9 +167,7 @@ class TestCrossScopeIsolation:
         """
         user_id = 42
         dm = _make_update(user_id=user_id, chat_id=user_id, message_thread_id=None)
-        topic = _make_update(
-            user_id=user_id, chat_id=-1001234, message_thread_id=7
-        )
+        topic = _make_update(user_id=user_id, chat_id=-1001234, message_thread_id=7)
 
         user_data: dict[str, str | None] = {
             user_data_session_key(dm): "dm-session-abc",
@@ -309,9 +279,7 @@ class TestRestartRecovery:
         dm = _make_update(user_id=user_id, chat_id=user_id, message_thread_id=None)
         u, c, t = scope_key(dm)
 
-        assert (
-            self._load_by_scope(rows, user_id=u, chat_id=c, thread_id=t) is None
-        )
+        assert self._load_by_scope(rows, user_id=u, chat_id=c, thread_id=t) is None
 
 
 class TestEnsureDmWorkdir:
@@ -338,9 +306,7 @@ class TestEnsureDmWorkdir:
             assert first == second
 
     def test_raises_on_non_dm_update(self) -> None:
-        update = _make_update(
-            user_id=42, chat_id=-1001234, message_thread_id=7
-        )
+        update = _make_update(user_id=42, chat_id=-1001234, message_thread_id=7)
 
         with tempfile.TemporaryDirectory() as tmp:
             with pytest.raises(ValueError):

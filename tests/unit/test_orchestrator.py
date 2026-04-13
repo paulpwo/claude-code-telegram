@@ -452,9 +452,7 @@ async def test_agentic_voice_calls_claude(agentic_settings, deps, monkeypatch):
         update.message.voice, "please summarize"
     )
     claude_integration.run_command.assert_awaited_once()
-    assert (
-        context.user_data[user_data_session_key(update)] == "voice-session-123"
-    )
+    assert context.user_data[user_data_session_key(update)] == "voice-session-123"
 
 
 async def test_agentic_text_dm_uses_dm_workdir_as_working_directory(
@@ -524,16 +522,13 @@ async def test_agentic_text_forum_topic_does_not_use_dm_workdir(
     every update. The existing behavior — explicit current_directory or
     settings.approved_directory — must be preserved.
     """
+
     # If this test accidentally reached ensure_dm_workdir, it would mean
     # is_dm() returned True for a forum update. Fail loud in that case.
     def _should_not_be_called(update):
-        raise AssertionError(
-            "ensure_dm_workdir must not run for a forum-topic update"
-        )
+        raise AssertionError("ensure_dm_workdir must not run for a forum-topic update")
 
-    monkeypatch.setattr(
-        "src.bot.orchestrator.ensure_dm_workdir", _should_not_be_called
-    )
+    monkeypatch.setattr("src.bot.orchestrator.ensure_dm_workdir", _should_not_be_called)
     orchestrator = MessageOrchestrator(agentic_settings, deps)
 
     mock_response = MagicMock()

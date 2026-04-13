@@ -345,8 +345,7 @@ class MessageOrchestrator:
                 user_id=update.effective_user.id if update.effective_user else None,
             )
             error_text = (
-                "❌ Could not create your DM workspace. "
-                "Please contact the admin."
+                "❌ Could not create your DM workspace. " "Please contact the admin."
             )
             try:
                 if progress_msg is not None:

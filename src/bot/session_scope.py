@@ -110,9 +110,7 @@ def dm_workdir_for(user_id: int, root: Path = DM_WORKSPACE_ROOT) -> Path:
     return root / f"_dm_{user_id}"
 
 
-def ensure_dm_workdir(
-    update: ScopeSource, root: Path = DM_WORKSPACE_ROOT
-) -> Path:
+def ensure_dm_workdir(update: ScopeSource, root: Path = DM_WORKSPACE_ROOT) -> Path:
     """Idempotently create ``/workspace/_dm_<user_id>`` for DM scopes.
 
     Returns the resolved DM directory path. If the update is NOT a DM,
@@ -134,7 +132,5 @@ def ensure_dm_workdir(
     try:
         path.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        raise DmWorkdirError(
-            f"Could not create DM workspace {path}: {exc}"
-        ) from exc
+        raise DmWorkdirError(f"Could not create DM workspace {path}: {exc}") from exc
     return path

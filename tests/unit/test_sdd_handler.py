@@ -308,9 +308,7 @@ async def test_sdd_command_session_id_stored_after_success(settings_sdd_enabled)
 
     from src.bot.session_scope import user_data_session_key
 
-    assert (
-        context.user_data.get(user_data_session_key(update)) == "new-session-xyz"
-    )
+    assert context.user_data.get(user_data_session_key(update)) == "new-session-xyz"
 
 
 # ---------------------------------------------------------------------------
