@@ -24,6 +24,29 @@ def agentic_settings(tmp_dir):
     return create_test_config(
         approved_directory=str(tmp_dir),
         agentic_mode=True,
+        enable_project_threads=False,
+        enable_voice_replies=False,
+        enable_scheduler=False,
+    )
+
+
+@pytest.fixture
+def classic_settings(tmp_dir):
+    return create_test_config(
+        approved_directory=str(tmp_dir),
+        agentic_mode=False,
+        enable_project_threads=False,
+        enable_voice_replies=False,
+        enable_scheduler=False,
+    )
+
+
+@pytest.fixture
+def full_agentic_settings(tmp_dir):
+    """Agentic settings with all optional features enabled — used for command-count tests."""
+    return create_test_config(
+        approved_directory=str(tmp_dir),
+        agentic_mode=True,
         enable_voice_replies=True,
         enable_scheduler=True,
         enable_project_threads=True,
@@ -31,7 +54,8 @@ def agentic_settings(tmp_dir):
 
 
 @pytest.fixture
-def classic_settings(tmp_dir):
+def full_classic_settings(tmp_dir):
+    """Classic settings with all optional features enabled — used for command-count tests."""
     return create_test_config(
         approved_directory=str(tmp_dir),
         agentic_mode=False,
@@ -95,9 +119,9 @@ def deps():
     }
 
 
-def test_agentic_registers_8_commands(agentic_settings, deps):
+def test_agentic_registers_8_commands(full_agentic_settings, deps):
     """Agentic mode registers all expected commands including voice, topics, sdd, git."""
-    orchestrator = MessageOrchestrator(agentic_settings, deps)
+    orchestrator = MessageOrchestrator(full_agentic_settings, deps)
     app = MagicMock()
     app.add_handler = MagicMock()
 
@@ -129,9 +153,9 @@ def test_agentic_registers_8_commands(agentic_settings, deps):
     assert frozenset({"schedule"}) in commands
 
 
-def test_classic_registers_15_commands(classic_settings, deps):
+def test_classic_registers_15_commands(full_classic_settings, deps):
     """Classic mode registers all expected commands."""
-    orchestrator = MessageOrchestrator(classic_settings, deps)
+    orchestrator = MessageOrchestrator(full_classic_settings, deps)
     app = MagicMock()
     app.add_handler = MagicMock()
 
@@ -175,9 +199,9 @@ def test_agentic_registers_text_document_photo_handlers(agentic_settings, deps):
     assert len(cb_handlers) == 5
 
 
-async def test_agentic_bot_commands(agentic_settings, deps):
+async def test_agentic_bot_commands(full_agentic_settings, deps):
     """Agentic mode returns all expected bot commands."""
-    orchestrator = MessageOrchestrator(agentic_settings, deps)
+    orchestrator = MessageOrchestrator(full_agentic_settings, deps)
     commands = await orchestrator.get_bot_commands()
 
     assert len(commands) == 13
@@ -200,9 +224,9 @@ async def test_agentic_bot_commands(agentic_settings, deps):
         assert expected in cmd_names, f"Missing command: {expected}"
 
 
-async def test_classic_bot_commands(classic_settings, deps):
+async def test_classic_bot_commands(full_classic_settings, deps):
     """Classic mode returns all expected bot commands."""
-    orchestrator = MessageOrchestrator(classic_settings, deps)
+    orchestrator = MessageOrchestrator(full_classic_settings, deps)
     commands = await orchestrator.get_bot_commands()
 
     assert len(commands) == 18
